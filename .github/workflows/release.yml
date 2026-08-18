@@ -62,21 +62,23 @@ jobs:
         run: |
           set -euo pipefail
           ls dist
-          test -f "dist/deadman-${{ needs.check-version.outputs.version }}.tar.gz"
-          test -f "dist/deadman-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+          # distribution is deadman-kit -> artifact stems are deadman_kit-<version>* (PEP 427/625 normalisation)
+          test -f "dist/deadman_kit-${{ needs.check-version.outputs.version }}.tar.gz"
+          test -f "dist/deadman_kit-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
       - name: Clean venv, --no-deps, neutral cwd, import + smoke
         shell: bash
         run: |
           set -euo pipefail
-          WHEEL="$(pwd)/dist/deadman-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+          WHEEL="$(pwd)/dist/deadman_kit-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
           python -m venv "$RUNNER_TEMP/cleanvenv"
           PY="$RUNNER_TEMP/cleanvenv/bin/python"
           "$PY" -m pip install --quiet --no-deps "$WHEEL"
           "$PY" -m pip check
           cd "$RUNNER_TEMP"                                   # neutral cwd: the local source tree must NOT be importable
           "$PY" - <<'EOF'
-          import sys, tempfile, deadman
+          import sys, tempfile, deadman            # installs as deadman-kit, imports as deadman
           assert "site-packages" in deadman.__file__, deadman.__file__
+          import importlib.metadata as md; assert md.version("deadman-kit") == deadman.__version__, (md.version("deadman-kit"), deadman.__version__)
           from deadman import *
           root = tempfile.mkdtemp()
           clock = FakeClock(); paths = Paths(root); ident = WriterIdentity(clock, pid=1)
@@ -106,7 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: release
-      url: https://pypi.org/project/deadman/${{ needs.check-version.outputs.version }}/
+      url: https://pypi.org/project/deadman-kit/${{ needs.check-version.outputs.version }}/
     permissions:
       id-token: write   # OIDC for trusted publishing
       contents: read

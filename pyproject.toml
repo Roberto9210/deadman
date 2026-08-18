@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "deadman"
+name = "deadman-kit"          # PyPI distribution name ("deadman" is taken); the import stays `deadman`
 version = "0.1.0"
 description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill state machine, hash-chained and externally anchored ledger. Zero runtime dependencies."
 readme = "README.md"

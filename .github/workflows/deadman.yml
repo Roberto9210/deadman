@@ -48,7 +48,7 @@ jobs:
       - name: Clean venv install and smoke run
         shell: bash
         run: |
-          WHEEL="$(ls "$PWD"/dist/deadman-*.whl)"
+          WHEEL="$(ls "$PWD"/dist/deadman_kit-*.whl)"   # distribution deadman-kit, import deadman
           python -m venv "$RUNNER_TEMP/cleanvenv"
           if [ -f "$RUNNER_TEMP/cleanvenv/bin/python" ]; then PY="$RUNNER_TEMP/cleanvenv/bin/python"; else PY="$RUNNER_TEMP/cleanvenv/Scripts/python.exe"; fi
           "$PY" -m pip install --no-deps "$WHEEL"
