@@ -24,11 +24,12 @@ Specification (the contract this code is written against):
 | `EntryHalt` | §4.2, decisions B/D | done |
 | `KillSwitch` (existence only, never parsed) | §4.1, decision A | done |
 | `Intent` / `resolve_units` / exit predicates (`spot_long_only_is_exit` default, `net_position_is_exit`) | §4.3, §4.4 | done |
-| `DailyLimits`, `OrderSanity` | §4.4 | pending |
+| `DailyLimits` (net-of-fees P&L, UTC rollover ledgered, clock-backwards fail-closed, decision B) | §4.4 | done |
+| `OrderSanity` (+ `quantize`: floor only, never enlarge to a venue minimum) | §4.4 | done |
 | `BrokerPort`, `HonestExecutor` (post-fill state machine, `reconcile`) | §4.6, §5.3, §5.4 | pending (last) |
 
 Conformance test groups implemented: G1 (kill switch), G2 (entry halt), G3 (units + exit
-predicates), G11 (ledger, anchoring, ANCHOR_STALE, rotation, two real processes), G12 (clock/paths),
+predicates), G4 (daily limits), G5 (order sanity), G10 partial (zero defaults for G4/G5 inputs), G11 (ledger, anchoring, ANCHOR_STALE, rotation, two real processes), G12 (clock/paths),
 G13 (concurrent writer). Run:
 
 ```bash

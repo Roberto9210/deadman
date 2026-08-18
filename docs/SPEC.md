@@ -230,21 +230,31 @@ def net_position_is_exit(intent, position) -> bool            # True si |net + d
 
 @dataclass(frozen=True)
 class Limits: max_trades_per_day: int | None; max_daily_loss_usd: float | None; max_notional_usd_per_order: float | None
+              worst_case_fee_bps: float | None   # fee desconocido en un fill: se carga a este peor caso; None => el día queda fees_unverified y las entradas se deniegan
 class DailyLimits:
-    def __init__(self, paths: Paths, limits: Limits, is_exit: ExposurePredicate, clock: Clock)
+    def __init__(self, paths: Paths, limits: Limits, is_exit: ExposurePredicate, clock: Clock, ident: WriterIdentity, ledger: Ledger | None = None)
     def check(self, intent: Intent, resolved: Resolved, position: PositionSnapshot | None) -> Verdict
                                                 # 1º: si is_exit(intent, position): Verdict.allow("EXIT_BYPASSES_DAILY_LIMITS") SIN leer el archivo
                                                 # 2º: stats ilegible => Verdict.deny("DAILY_STATS_UNREADABLE") (solo entradas llegan acá)
-    def record_fill(self, intent: Intent, filled_usd: float) -> None    # entradas Y salidas cuentan
-    def record_pnl(self, realized_pnl_usd: float) -> None
-    def stats(self) -> DailyStats                                       # día UTC actual (rollover al leer)
+                                                # 3º: día del archivo > hoy (reloj hacia atrás) => deny("DAILY_STATS_CLOCK_BACKWARDS"), nada se resetea
+                                                # 4º: clave ausente => deny("DAILY_STATS_KEY_MISSING") - jamás un default
+                                                # 5º: fees_unverified => deny("DAILY_FEES_UNVERIFIED"); luego notional/trades/pérdida NETA
+    def record_fill(self, intent: Intent, filled_usd: float, fee_usd: float | None) -> DailyStats   # entradas Y salidas cuentan; fee None nunca es 0
+    def record_pnl(self, gross_realized_pnl_usd: float) -> DailyStats                                # neto = gross - fees acumuladas por fill
+    def stats(self) -> DailyStats | None                                # día UTC actual (rollover al leer, anotado como DAILY_STATS_RESET); None si ilegible
 
 class OrderSanity:
-    def __init__(self, allowed_symbols: frozenset[str], max_latency_ms: float, max_spread_bps: float)
+    def __init__(self, allowed_symbols: frozenset[str], max_latency_ms: float, max_spread_bps: float,
+                 min_notional_usd: float | None = None, max_notional_usd: float | None = None,   # OPCIONALES declarados: None = chequeo omitido (y dicho en el veredicto)
+                 max_ref_deviation_bps: float | None = None)                                     # si se configura, ref_price es OBLIGATORIO en check()
     def check(self, intent: Intent, resolved: Resolved, *,
               broker_status: str, latency_ms: float, bid: float, ask: float,
-              size_available: float | None) -> Verdict
+              size_available: float | None, is_exit: bool, ref_price: float | None = None) -> Verdict
               # aplica a entradas Y salidas; cualquier argumento None/NaN => denegado <ARG>_MISSING
+              # size_available: salida => base disponible vs amount_base; entrada => quote disponible vs amount_usd
+              # bajo min_notional => NOTIONAL_BELOW_MIN: se DENIEGA, jamás se agranda la orden para llegar al mínimo
+    def quantize(self, intent, resolved, *, amount_step: float, price: float) -> QuantizeResult
+              # floor al step del venue SIEMPRE (entradas y salidas: nunca más de lo pedido); queda 0 => AMOUNT_BELOW_STEP
               # size_available: para BASE/CONTRACTS en salida = base disponible; para USD en entrada = quote disponible
 
 # ---------- 5. ledger encadenado + anclado (§2b) ----------
@@ -337,7 +347,7 @@ puede (permisos), levanta en construcción — el sistema no arranca sin poder e
 | `kill_switch.enabled` | (sin contenido; puede tener texto libre para humanos) | **Su existencia es la señal. El kit no abre el archivo.** |
 | (no hay `kill_state.json`) | — | **Decisión A (2026-08-18): solo sentinel.** El kill switch **no parsea nada**: cuenta la EXISTENCIA del archivo, nunca su contenido. Es la pieza que tiene que funcionar cuando todo lo demás falló, y un parse (JSON, YAML, encoding, permisos de lectura) es un modo de falla más. `engage(reason)` escribe la razón en el ledger si hay uno; si el ledger falla, el sentinel se crea igual (el sentinel manda). |
 | `entry_halt.json` | `{schema_version, active: true, reason: str(<=300), source: str, ts_utc, auto_clear: bool, writer_pid, writer_started_at, write_seq}` | Presencia con `active:true` = halt. Ilegible = halt. Escritura atómica (tmp + replace). `clear()` borra el archivo. |
-| `daily_stats.json` | `{schema_version, day_utc: "YYYY-MM-DD", trades: int, filled_usd: float, realized_pnl_usd: float, updated_ts_utc, writer_pid, writer_started_at, write_seq}` | Al leer, si `day_utc != clock.today_utc()` ⇒ se reinicia en memoria y se persiste. Ilegible ⇒ **Decisión B (2026-08-18): fail‑closed SOLO para entradas**: `check()` deniega toda entrada con `DAILY_STATS_UNREADABLE` y lo anota en el ledger; **una salida pasa igual** (`is_exit` ⇒ `EXIT_BYPASSES_DAILY_LIMITS` se evalúa ANTES de leer el archivo, así que un archivo corrupto no puede atrapar una posición). No se reinicia solo: lo repara un humano (borrar el archivo ⇒ nuevo día limpio) y queda `DAILY_STATS_RESET` en el ledger. |
+| `daily_stats.json` | `{schema_version, day_utc: "YYYY-MM-DD", trades: int, filled_usd: float, gross_pnl_usd: float, fees_usd: float, fees_estimated: int, fees_unverified: bool, updated_ts_utc, writer_pid, writer_started_at, write_seq}` (neto = gross − fees) | Al leer, si `day_utc != clock.today_utc()` ⇒ se reinicia en memoria y se persiste. Ilegible ⇒ **Decisión B (2026-08-18): fail‑closed SOLO para entradas**: `check()` deniega toda entrada con `DAILY_STATS_UNREADABLE` y lo anota en el ledger; **una salida pasa igual** (`is_exit` ⇒ `EXIT_BYPASSES_DAILY_LIMITS` se evalúa ANTES de leer el archivo, así que un archivo corrupto no puede atrapar una posición). No se reinicia solo: lo repara un humano (borrar el archivo ⇒ nuevo día limpio) y queda `DAILY_STATS_RESET` en el ledger. |
 | `ledger/chain_state.json` | `{schema_version, last_seq: int, last_hash: str}` | Solo el tip. Reemplazo atómico. Ver 5.5. |
 | `ledger/ledger.jsonl` | una `Entry` por línea | Append‑only. |
 | `ledger/anchors.jsonl` | un `Anchor` por línea | Copia local de lo publicado; la verdad está en el tercero (`verify(anchors=…)` acepta la lista externa). |
