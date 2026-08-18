@@ -7,7 +7,7 @@ connotaciones. Decidido 2026-08-18; `failclosed` queda como nombre del principio
 `deadman`: primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
 de estrategia. Este documento fijó el contrato ANTES de escribir código (v0.1 cerrada 2026-08-18) y desde
 entonces se mantiene como la referencia contra la que se implementa. **Estado al 2026-08-18: implementada
-en la raíz de este repositorio (v0.1.0). Conformidad exacta en §6b — no "12/12".** Nació de un inventario de
+en la raíz de este repositorio (v0.1.0). Conformidad exacta en §6b — no "13/13".** Nació de un inventario de
 extracción de la capa de seguridad de un sistema de trading real (documento interno de ese sistema, no público).
 
 Lector objetivo: alguien que nunca vio el sistema del que esto sale. Donde una decisión no puede
@@ -536,7 +536,7 @@ justificación de plataforma escrita en el propio test), en `tests/`:**
   sizing es del usuario; el principio de §2 le aplica y el kit no puede probarlo por él.
 
 Nada más está fuera. La afirmación pública es: **11 grupos implementados, 165 casos, 2 elementos fuera de
-alcance con fundamento — no "12/12".** Lo que **no** viaja: risk‑exit por ATR,
+alcance con fundamento — no "13/13".** Lo que **no** viaja: risk‑exit por ATR,
 TTL de posición, capital operativo, política de señal única, SPX, EMA, código muerto — es del sistema de origen.
 
 ---

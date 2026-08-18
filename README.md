@@ -8,7 +8,7 @@ strategy-agnostic. Every claim below has a test or a spec section behind it — 
 Specification: [`docs/SPEC.md`](docs/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
 Conformance statement, exact: **11 of 13 test groups implemented, 165 collected cases (164 pass, 1 platform skip
 with its reason in the test), 2 elements declared out of scope with rationale** — see [SPEC §6b](docs/SPEC.md).
-Not "12/12".
+Not "13/13".
 
 ## What it is not — said first, without shame
 
