@@ -13,7 +13,7 @@ readme = "README.md"
 # anything newer. Tested on 3.10-3.14 in CI.
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Roberto9210" }]
+authors = [{ name = "Roberto Rodriguez" }]
 keywords = ["trading", "safety", "kill-switch", "ledger", "fail-closed", "execution"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -37,7 +37,9 @@ dependencies = []
 test = ["pytest>=8"]
 
 [project.urls]
-Specification = "https://github.com/Roberto9210/ALAYA/blob/main/docs/safety_kit/SPEC.md"
+Homepage = "https://github.com/Roberto9210/deadman"
+Specification = "https://github.com/Roberto9210/deadman/blob/main/docs/SPEC.md"
+Changelog = "https://github.com/Roberto9210/deadman/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 include = ["deadman*"]

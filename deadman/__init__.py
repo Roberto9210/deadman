@@ -1,5 +1,5 @@
 """deadman - execution-safety primitives for automated trading systems.
-See docs/safety_kit/SPEC.md (v0.1). Implemented so far: Paths, clocks,
+See docs/SPEC.md (v0.1). Paths, clocks,
 StateFile (writer seal), Ledger (hash chain, anchored rotation, external anchoring; zero deps), EntryHalt, KillSwitch."""
 from .clock import Clock, SystemClock, FakeClock
 from .paths import Paths

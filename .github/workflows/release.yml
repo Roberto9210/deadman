@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   check-version:
-    # The tag MUST equal the version in packages/deadman/pyproject.toml.
+    # The tag MUST equal the version in pyproject.toml.
     # A mismatch fails here, loudly, before anything is built or published.
     runs-on: ubuntu-latest
     outputs:
@@ -30,7 +30,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"                       # e.g. v0.1.0
           PYVER="$(python - <<'EOF'
           import tomllib
-          with open("packages/deadman/pyproject.toml", "rb") as f:
+          with open("pyproject.toml", "rb") as f:
               print(tomllib.load(f)["project"]["version"])
           EOF
           )"
@@ -49,9 +49,6 @@ jobs:
   build-and-smoke:
     needs: [check-version, suite]
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/deadman
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -98,7 +95,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: deadman-release-dist
-          path: packages/deadman/dist/*
+          path: dist/*
           if-no-files-found: error
 
   publish:

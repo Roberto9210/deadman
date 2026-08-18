@@ -7,7 +7,7 @@ connotaciones. Decidido 2026-08-18; `failclosed` queda como nombre del principio
 `deadman`: primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
 de estrategia. Este documento fijó el contrato ANTES de escribir código (v0.1 cerrada 2026-08-18) y desde
 entonces se mantiene como la referencia contra la que se implementa. **Estado al 2026-08-18: implementada
-en `packages/deadman` (v0.1.0). Conformidad exacta en §6b — no "12/12".** Base:
+en la raíz de este repositorio (v0.1.0; originalmente `packages/deadman` del sistema de origen). Conformidad exacta en §6b — no "12/12".** Base:
 `reports/safety_kit_extraction_inventory_20260818.md`.
 
 Lector objetivo: alguien que nunca vio el sistema del que esto sale. Donde una decisión no puede
@@ -499,10 +499,10 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 Total estimado (al escribir la spec): **~150 aserciones**, de las cuales ~97 son las que ya existen reescritas y
 ~48 nuevas (kill switch, ledger y rotación, cero defaults, reloj, escritor concurrente).
 
-### 6b. Conformidad implementada — afirmación exacta (2026-08-18, `packages/deadman` v0.1.0)
+### 6b. Conformidad implementada — afirmación exacta (2026-08-18, v0.1.0)
 
 **Implementados: 11 de los 13 grupos, 165 casos de prueba recolectados por pytest (164 pasan, 1 skip con
-justificación de plataforma escrita en el propio test), en `packages/deadman/tests/`:**
+justificación de plataforma escrita en el propio test), en `tests/`:**
 
 | Grupo | Archivo | Casos | Estado |
 |---|---|---|---|

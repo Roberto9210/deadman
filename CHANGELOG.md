@@ -11,7 +11,7 @@ then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publis
 
 ## 0.1.0 — 2026-08-18
 
-First release. Implements `docs/safety_kit/SPEC.md` v0.1 (closed 2026-08-18).
+First release. Implements `docs/SPEC.md` v0.1 (closed 2026-08-18).
 
 - `KillSwitch`: existence of one file stops everything, entries and exits; never opened or parsed.
 - `EntryHalt`: persistent, blocks new exposure only; unreadable file = halted; concurrent-writer detection.

@@ -5,16 +5,16 @@
 Execution-safety primitives for automated trading systems. Zero runtime dependencies. Broker-agnostic,
 strategy-agnostic. Every claim below has a test or a spec section behind it — the links are the argument.
 
-Specification: [`docs/safety_kit/SPEC.md`](../../docs/safety_kit/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
+Specification: [`docs/SPEC.md`](docs/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
 Conformance statement, exact: **11 of 13 test groups implemented, 165 collected cases (164 pass, 1 platform skip
-with its reason in the test), 2 elements declared out of scope with rationale** — see [SPEC §6b](../../docs/safety_kit/SPEC.md).
+with its reason in the test), 2 elements declared out of scope with rationale** — see [SPEC §6b](docs/SPEC.md).
 Not "12/12".
 
 ## What it is not — said first, without shame
 
 deadman does **not** bring a strategy, signals, a market-data feed, a broker connection, position sizing,
 paper accounting, or any notion of your account's equity. You pass it a `BrokerPort` adapter (five
-methods, [guarantees G1–G9](../../docs/safety_kit/SPEC.md)) and an `Intent`; it returns allowed/denied with a
+methods, [guarantees G1–G9](docs/SPEC.md)) and an `Intent`; it returns allowed/denied with a
 code, and — if asked — runs the post-fill sequence honestly. Everything it needs to decide it receives in
 the call. Nothing it needs is guessed.
 
@@ -36,7 +36,7 @@ verifies** — and
 attacker wiping the local anchors file, is caught by `verify(anchors=…)` with the anchors held by the third
 party (`ANCHOR_MISMATCH`).
 
-**What counts as a third party** ([SPEC §2b](../../docs/safety_kit/SPEC.md)): a git branch **protected against
+**What counts as a third party** ([SPEC §2b](docs/SPEC.md)): a git branch **protected against
 force-push and deletion for everyone including the owner**, or an **RFC 3161 timestamp authority**, or a
 third-party append-only service with server-side timestamps. A remote you can force-push is not one — the
 anchor is then worth nothing over the local chain. Sustained publisher failure is not silent:
@@ -62,7 +62,7 @@ These are patterns from a real system, kept as patterns. They are the reason the
 | **Injectable clock** | A `now()` nobody controlled made a daily rollover and an outcome window irreproducible. | Every primitive receives a `Clock`; no module calls the wall clock (static test). | [G12](tests/test_g12_clock_and_paths.py) |
 | **Writer seal** | Two adapters once ran at the same time against the same state. | Every state file carries `(writer_pid, writer_started_at, write_seq)`; a changed seal between read and write is `CONCURRENT_WRITER_DETECTED` — not prevented, made loud. | [G13](tests/test_g13_concurrent_writer.py) |
 
-The principle behind all of it — *zero plausible defaults* — is a contract, not a slogan: [SPEC §2](../../docs/safety_kit/SPEC.md).
+The principle behind all of it — *zero plausible defaults* — is a contract, not a slogan: [SPEC §2](docs/SPEC.md).
 
 ## What this library does not protect against
 
@@ -84,7 +84,7 @@ This section is what makes the rest credible.
   is the reference shape) are how you check an adapter.
 - **Your account and your sizing.** deadman has no equity, no positions of its own, no snapshot of your
   account. `size_available` is whatever you pass; a stale balance you pass as fresh is your stale balance
-  (SPEC G8 is out of scope for this reason — [SPEC §6b](../../docs/safety_kit/SPEC.md)).
+  (SPEC G8 is out of scope for this reason — [SPEC §6b](docs/SPEC.md)).
 - **Losing money.** It stops you from acting on what it cannot vouch for. It does not know whether your
   strategy has an edge.
 
@@ -124,7 +124,7 @@ publisher. Neither is provided: the library does not talk to the network.
 
 ```bash
 pip install deadman            # zero runtime dependencies
-python -m pytest -q packages/deadman/tests   # 165 cases; Windows, Linux, macOS in CI
+python -m pytest -q tests   # 165 cases; Windows, Linux, macOS in CI
 ```
 
 CI: `.github/workflows/deadman.yml` — ubuntu/windows/macos × Python 3.10/3.12/3.14, plus a job that builds

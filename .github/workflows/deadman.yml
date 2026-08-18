@@ -2,15 +2,10 @@ name: deadman
 
 on:
   push:
-    paths: ["packages/deadman/**", ".github/workflows/deadman.yml"]
+    branches: ["main"]
   pull_request:
-    paths: ["packages/deadman/**", ".github/workflows/deadman.yml"]
   workflow_dispatch:
   workflow_call:      # reused as-is by release.yml: a release runs the SAME suite as CI
-
-defaults:
-  run:
-    working-directory: packages/deadman
 
 jobs:
   test:
@@ -75,4 +70,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: deadman-dist-${{ matrix.os }}
-          path: packages/deadman/dist/*
+          path: dist/*
