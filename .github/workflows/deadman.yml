@@ -48,13 +48,17 @@ jobs:
       - name: Clean venv install and smoke run
         shell: bash
         run: |
-          python -m venv /tmp/cleanvenv
-          if [ -f /tmp/cleanvenv/bin/python ]; then PY=/tmp/cleanvenv/bin/python; else PY=/tmp/cleanvenv/Scripts/python.exe; fi
-          $PY -m pip install --no-deps dist/deadman-*.whl
-          $PY -m pip check
-          $PY -c "import deadman, sys; print(deadman.__version__); assert deadman.__file__.find('site-packages')>=0"
-          $PY - <<'EOF'
-          import tempfile
+          WHEEL="$(ls "$PWD"/dist/deadman-*.whl)"
+          python -m venv "$RUNNER_TEMP/cleanvenv"
+          if [ -f "$RUNNER_TEMP/cleanvenv/bin/python" ]; then PY="$RUNNER_TEMP/cleanvenv/bin/python"; else PY="$RUNNER_TEMP/cleanvenv/Scripts/python.exe"; fi
+          "$PY" -m pip install --no-deps "$WHEEL"
+          "$PY" -m pip check
+          # NEUTRAL cwd: from the repo root the source tree ./deadman shadows the installed
+          # package (cwd is on sys.path) and the smoke would "pass" without testing the wheel.
+          cd "$RUNNER_TEMP"
+          "$PY" -c "import deadman, sys; print(deadman.__version__, deadman.__file__); assert 'site-packages' in deadman.__file__, deadman.__file__"
+          "$PY" - <<'EOF'
+          import sys, tempfile
           from deadman import *
           root = tempfile.mkdtemp()
           clock = FakeClock(); paths = Paths(root); ident = WriterIdentity(clock, pid=1)
@@ -65,9 +69,13 @@ jobs:
           r = resolve_units(Intent("BTC/USD", "buy", "USD", 10.0, "ENTRY", "smoke"), 100.0)
           assert abs(r.amount_base - 0.1) < 1e-12
           rep = ledger.verify(); assert rep.ok and rep.chain_complete
-          print("smoke ok: entries", rep.entries_checked, "anchors", rep.anchors_checked)
+          mods = {m.split('.')[0] for m in list(sys.modules) if not m.startswith('_')}
+          third = [m for m in mods if m not in sys.stdlib_module_names and m != 'deadman' and not m.startswith('encodings')]
+          assert third == [], third
+          print("smoke ok: entries", rep.entries_checked, "anchors", rep.anchors_checked, "non-stdlib modules:", third)
           EOF
       - uses: actions/upload-artifact@v4
         with:
           name: deadman-dist-${{ matrix.os }}
           path: dist/*
+          if-no-files-found: error
