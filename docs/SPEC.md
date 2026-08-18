@@ -1,6 +1,10 @@
-# Safety Kit — especificación (v0.1, 2026-08-18)
+# deadman — especificación (v0.1, 2026-08-18)
 
-Primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
+**Nombre fijado: `deadman`** (de *dead man's switch*): la máquina se detiene cuando nadie puede dar fe de que
+todo está bien. Nombra la garantía central, es término real de ingeniería de seguridad y no arrastra
+connotaciones. Decidido 2026-08-18; `failclosed` queda como nombre del principio (§2), no del paquete.
+
+`deadman`: primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
 de estrategia. Este documento fija el contrato ANTES de escribir código. Nada de lo que sigue está
 implementado. Base: `reports/safety_kit_extraction_inventory_20260818.md`.
 
@@ -103,16 +107,15 @@ un identificador estable en MAYÚSCULAS (`KILL_SWITCH_ACTIVE`, `ENTRY_HALT_ACTIV
 class Paths:
     def __init__(self, root: PathLike)                     # ver §5.1
     kill_sentinel: Path      # root/"kill_switch.enabled"
-    kill_state:    Path      # root/"kill_state.json"       (opcional, ver §5.2)
     entry_halt:    Path      # root/"entry_halt.json"
     daily_stats:   Path      # root/"daily_stats.json"
     ledger_dir:    Path      # root/"ledger"/  -> ledger.jsonl, chain_state.json, chain_state.lock, keys/
 
 # ---------- 1. kill switch ----------
 class KillSwitch:
-    def __init__(self, paths: Paths, state_key: str = "kill_switch", require_state_file: bool = False)
-    def check(self) -> Verdict            # bloqueado si: sentinel existe | (require_state_file y falta/ilegible/sin clave/true)
-                                          # cualquier OSError => bloqueado con code KILL_SWITCH_CHECK_FAILED
+    def __init__(self, paths: Paths, ledger: SignedLedger | None = None)
+    def check(self) -> Verdict            # bloqueado si el sentinel EXISTE (os.path.exists); el contenido NUNCA se lee ni se parsea
+                                          # cualquier OSError al comprobar => bloqueado con code KILL_SWITCH_CHECK_FAILED
     def engage(self, reason: str) -> None # crea sentinel (idempotente) y anota en ledger si se le pasó uno
     def release(self, note: str) -> None  # borra el sentinel; el JSON no se toca (lo limpia un humano)
 
@@ -154,7 +157,8 @@ class Limits: max_trades_per_day: int | None; max_daily_loss_usd: float | None; 
 class DailyLimits:
     def __init__(self, paths: Paths, limits: Limits, is_exit: ExposurePredicate, clock: Clock)
     def check(self, intent: Intent, resolved: Resolved, position: PositionSnapshot | None) -> Verdict
-                                                # si is_exit(intent, position): Verdict.allow("EXIT_BYPASSES_DAILY_LIMITS")
+                                                # 1º: si is_exit(intent, position): Verdict.allow("EXIT_BYPASSES_DAILY_LIMITS") SIN leer el archivo
+                                                # 2º: stats ilegible => Verdict.deny("DAILY_STATS_UNREADABLE") (solo entradas llegan acá)
     def record_fill(self, intent: Intent, filled_usd: float) -> None    # entradas Y salidas cuentan
     def record_pnl(self, realized_pnl_usd: float) -> None
     def stats(self) -> DailyStats                                       # día UTC actual (rollover al leer)
@@ -246,10 +250,10 @@ puede (permisos), levanta en construcción — el sistema no arranca sin poder e
 ### 5.2 Esquemas de los archivos de estado (todos JSON UTF‑8, con `schema_version: 1`)
 | Archivo | Campos | Semántica |
 |---|---|---|
-| `kill_switch.enabled` | (sin contenido) | Su existencia es la señal. Contenido ignorado. |
-| `kill_state.json` (opcional) | `{schema_version, kill_switch: bool, reason: str|null, ts_utc}` | Segunda vía. Solo se consulta si `require_state_file=True`; entonces faltar/ilegible/sin clave ⇒ bloqueado. **DECISIÓN PENDIENTE A**: ¿viaja o solo el sentinel? Opción 1, solo sentinel (más simple, un solo mecanismo). Opción 2, ambos (compatibilidad con quien mira un JSON). Costo de 2: dos verdades a mantener coherentes. Recomendación: 1, y `engage()` escribe la razón en el ledger, no en un JSON. |
-| `entry_halt.json` | `{schema_version, active: true, reason: str(<=300), source: str, ts_utc, auto_clear: bool}` | Presencia con `active:true` = halt. Ilegible = halt. Escritura atómica (tmp + replace). `clear()` borra el archivo. |
-| `daily_stats.json` | `{schema_version, day_utc: "YYYY-MM-DD", trades: int, filled_usd: float, realized_pnl_usd: float, updated_ts_utc}` | Al leer, si `day_utc != clock.today_utc()` ⇒ se reinicia en memoria y se persiste. Ilegible ⇒ **DECISIÓN PENDIENTE B**: (1) tratar como límites agotados (fail‑closed, puede bloquear un día entero por un archivo corrupto) o (2) reiniciar y anotar `DAILY_STATS_RESET_UNREADABLE` en el ledger (fail‑open sobre contadores). Recomendación: 1 para entradas — es coherente con §2 — y el ledger avisa. |
+| `kill_switch.enabled` | (sin contenido; puede tener texto libre para humanos) | **Su existencia es la señal. El kit no abre el archivo.** |
+| (no hay `kill_state.json`) | — | **Decisión A (2026-08-18): solo sentinel.** El kill switch **no parsea nada**: cuenta la EXISTENCIA del archivo, nunca su contenido. Es la pieza que tiene que funcionar cuando todo lo demás falló, y un parse (JSON, YAML, encoding, permisos de lectura) es un modo de falla más. `engage(reason)` escribe la razón en el ledger si hay uno; si el ledger falla, el sentinel se crea igual (el sentinel manda). |
+| `entry_halt.json` | `{schema_version, active: true, reason: str(<=300), source: str, ts_utc, auto_clear: bool, writer_pid, writer_started_at, write_seq}` | Presencia con `active:true` = halt. Ilegible = halt. Escritura atómica (tmp + replace). `clear()` borra el archivo. |
+| `daily_stats.json` | `{schema_version, day_utc: "YYYY-MM-DD", trades: int, filled_usd: float, realized_pnl_usd: float, updated_ts_utc, writer_pid, writer_started_at, write_seq}` | Al leer, si `day_utc != clock.today_utc()` ⇒ se reinicia en memoria y se persiste. Ilegible ⇒ **Decisión B (2026-08-18): fail‑closed SOLO para entradas**: `check()` deniega toda entrada con `DAILY_STATS_UNREADABLE` y lo anota en el ledger; **una salida pasa igual** (`is_exit` ⇒ `EXIT_BYPASSES_DAILY_LIMITS` se evalúa ANTES de leer el archivo, así que un archivo corrupto no puede atrapar una posición). No se reinicia solo: lo repara un humano (borrar el archivo ⇒ nuevo día limpio) y queda `DAILY_STATS_RESET` en el ledger. |
 | `ledger/chain_state.json` | `{schema_version, last_seq: int, last_hash: str}` | Solo el tip. Reemplazo atómico. Ver 5.5. |
 | `ledger/ledger.jsonl` | una `Entry` por línea | Append‑only. |
 | `ledger/keys/` | clave privada Ed25519 (permisos 0600) + pública | Si no existe al construir `SignedLedger` sin `signing_key`, se genera y se anota `KEY_GENERATED`. |
@@ -280,16 +284,34 @@ conforme si pasa las pruebas de §6 con estas garantías. (El primer adaptador p
 ### 5.5 Catálogo de `kind` del ledger y rotación
 Kinds mínimos: `KEY_GENERATED, KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, INTENT_DENIED, ORDER_SENT,
 FILL, PARTIAL_FILL, NO_FILL_CANCELED, UNKNOWN_STATE, RECONCILE_REPORT, DAILY_STATS_RESET, LEDGER_ROTATED,
-USER_NOTE`. Payload mínimo por kind se fija en el test correspondiente. Todo `payload` lleva `client_id` si
+CONCURRENT_WRITER_DETECTED, USER_NOTE`. Payload mínimo por kind se fija en el test correspondiente. Todo `payload` lleva `client_id` si
 existe.
-**Rotación sin romper `verify`:** **DECISIÓN PENDIENTE C** — el sistema de origen rotó el archivo y dejó un
-segmento cuya primera fila no encadena a génesis, con lo que `verify()` desde génesis falla y "congela".
-Opciones: (1) no rotar nunca (jsonl crece; simple; verify total siempre posible); (2) rotar escribiendo
-como primera entrada del segmento nuevo un `LEDGER_ROTATED{prev_segment, prev_last_hash, prev_last_seq}` y
-que `verify()` acepte encadenar desde ese ancla (verify por segmento + verificación del ancla contra el
-segmento anterior si está presente); (3) rotar y perder verificabilidad histórica (descartada). Recomendación:
-2, con `verify(from_seq)` documentado como "desde el último ancla disponible" cuando el segmento anterior no
-está.
+**Rotación — Decisión C (2026-08-18): rotación anclada, con enlace obligatorio.** El sistema de origen rotó
+el archivo y dejó un segmento cuya primera fila no encadena a génesis; `verify()` desde génesis fallaba. La
+rotación es el punto donde se puede falsificar historia; sin el enlace, se cae la única garantía que
+justifica un ledger firmado. Por eso:
+
+- Los segmentos se llaman `ledger.jsonl` (activo) y `ledger.<NNNN>.jsonl` (cerrados, NNNN creciente).
+- `rotate()` (1) toma el lock, (2) lee el tip `(last_seq, last_hash)`, (3) renombra `ledger.jsonl` →
+  `ledger.<NNNN>.jsonl`, (4) escribe como **primera** entrada del nuevo `ledger.jsonl` una `Entry` normal
+  (firmada, `prev_hash` = **el hash de la última entrada del archivo anterior**) con:
+
+      kind    = "LEDGER_ROTATED"
+      payload = {
+        "prev_segment":   "ledger.<NNNN>.jsonl",   # nombre del archivo cerrado
+        "prev_last_seq":  <int>,                   # seq de su última entrada
+        "prev_last_hash": "<hex>",                 # hash de su última entrada  (== prev_hash de esta Entry)
+        "prev_first_seq": <int>,                   # seq de su primera entrada
+        "prev_sha256":    "<hex>"                  # sha256 del archivo cerrado completo, tal como quedó
+      }
+
+- `verify(from_seq=None)`: recorre el segmento activo; al encontrar un `LEDGER_ROTATED`, si el
+  `prev_segment` existe lo abre, verifica que su última entrada tenga exactamente `prev_last_seq`/`prev_last_hash`
+  y que `sha256(archivo) == prev_sha256`, y continúa hacia atrás hasta génesis o hasta el primer segmento
+  ausente. Si un segmento ausente impide llegar a génesis, el reporte dice `verified_from_seq = <seq del
+  ancla más antiguo alcanzado>` y `chain_complete = False` — **nunca "OK" a secas**. Un `LEDGER_ROTATED` cuyo
+  `prev_last_hash` no coincida con su propio `prev_hash`, o cuyo segmento anterior no encaje, es
+  `VerifyReport.ok = False` con `code = ROTATION_LINK_BROKEN`.
 
 ### 5.6 Reloj UTC inyectable
 `Clock` es un objeto con `now_utc() -> datetime(tz=UTC)` y `today_utc() -> "YYYY-MM-DD"`. Todas las
@@ -299,13 +321,25 @@ test sin controlar el tiempo, y un `now()` implícito ya produjo un caso no repr
 origen. El reloj de producción es trivial; el de test avanza a mano.
 
 ### 5.7 Un solo escritor por archivo de estado
-`entry_halt.json`, `daily_stats.json` y `kill_switch.enabled` asumen **un único proceso escritor**; las
-escrituras son atómicas (tmp + `os.replace`) para que un lector concurrente nunca vea un archivo a medias, pero
-dos escritores se pisan. El **ledger** es la única pieza multi‑proceso: `append()` toma un lock de SO sobre
-`chain_state.lock` durante leer‑tip → escribir‑entrada → reemplazar‑tip. **DECISIÓN PENDIENTE D**: ¿el kit
-impone el lock también a `entry_halt`/`daily_stats` (más lento, más seguro) o documenta "un escritor" y deja
-al usuario? Costo de imponerlo: dependencia `msvcrt/fcntl` en tres archivos y latencia por escritura.
-Recomendación: documentar "un escritor" en v0.1; lock opcional en v0.2 si aparece un caso.
+**Decisión D (2026-08-18): sin locks de SO en v0.1 para `entry_halt.json` y `daily_stats.json`, pero
+"un escritor" NO se da por supuesto: se DETECTA.** El sistema de origen ya violó ese supuesto una vez (dos
+adaptadores arrancados a la vez); documentarlo no alcanza. Diseño:
+
+- Todo archivo de estado JSON lleva un **sello de escritor**: `writer_pid: int`, `writer_started_at: str`
+  (ISO UTC del arranque del proceso escritor, no de la escritura) y `write_seq: int` (monótono por archivo).
+- Cada escritura es atómica (tmp + `os.replace`) y sigue el ciclo **leer → decidir → escribir**. Antes de
+  reemplazar, el escritor relee el archivo actual; si el sello `(writer_pid, writer_started_at, write_seq)`
+  **no es el que leyó al empezar el ciclo** (otro proceso escribió en medio) ⇒ **no escribe**, levanta
+  `ConcurrentWriterDetected` y el llamador (el kit mismo) hace `halt.set("CONCURRENT_WRITER_DETECTED: …",
+  source=<módulo>, auto_clear=False)` y lo anota en el ledger. Si el conflicto es en el propio
+  `entry_halt.json`, el halt se escribe **forzado** (última escritura gana, con el motivo) — un halt de más es
+  aceptable, uno de menos no.
+- El sello se compara también al **arrancar**: si `entry_halt.json`/`daily_stats.json` tienen un
+  `writer_pid` distinto al propio y ese pid **sigue vivo**, es `CONCURRENT_WRITER_DETECTED` al inicio (el
+  guard de instancia única del sistema de origen, pero dentro del kit y por archivo).
+- No previene la carrera; la hace ruidosa. Es el contrato de toda la librería.
+- El **ledger** sí usa lock de SO (`chain_state.lock`, `msvcrt`/`fcntl`) porque es multi‑proceso por diseño.
+- El sentinel del kill switch no tiene sello: no tiene contenido.
 
 ---
 
@@ -318,21 +352,22 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 
 | Grupo | Origen (aserciones que viajan, reescritas) | Qué fija |
 |---|---|---|
-| **G1 Kill switch** (nuevo, ~8) | — | sentinel presente ⇒ todo denegado (entrada y salida); OSError al comprobar ⇒ denegado `KILL_SWITCH_CHECK_FAILED`; ausente ⇒ pasa; `engage/release` idempotentes y anotados. |
+| **G1 Kill switch** (nuevo, ~9) | — | sentinel presente ⇒ todo denegado (entrada y salida); **sentinel con contenido basura/binario/ilegible ⇒ igual bloqueado sin excepción (no se abre)**; OSError al comprobar ⇒ `KILL_SWITCH_CHECK_FAILED`; ausente ⇒ pasa; `engage/release` idempotentes y anotados. |
 | **G2 Entry halt** (gate, ~10) | exit_tanda gate | set ⇒ entrada denegada `ENTRY_HALT_ACTIVE` y salida pasa; archivo ilegible ⇒ halt; `auto_clear` solo si el existente lo era; `clear(only_auto_clear)` no borra un halt manual. |
 | **G3 Unidades** (16) | exit_tanda units | `USD`/`BASE`/`CONTRACTS` resuelven; ausente/inválido/amount≤0/price≤0 ⇒ excepción con el intent en el mensaje; salida en `BASE` vende exactamente lo pedido; nunca se infiere. |
-| **G4 Límites diarios** (gate, ~10) | exit_tanda gate | pérdida diaria / nº de trades / nocional bloquean entrada y **no** salida; los fills de salida incrementan contadores; rollover UTC con reloj inyectado; stats ilegible ⇒ (según decisión B) entradas denegadas. |
+| **G4 Límites diarios** (gate, ~10) | exit_tanda gate | pérdida diaria / nº de trades / nocional bloquean entrada y **no** salida; los fills de salida incrementan contadores; rollover UTC con reloj inyectado; **stats ilegible ⇒ entrada denegada `DAILY_STATS_UNREADABLE` y salida pasa sin leer el archivo**. |
 | **G5 Cordura de orden** (fix5 + gate, ~12) | cleanup fix5, exit gate | broker no `connected` / latencia > máx / spread > máx / símbolo no permitido / tamaño insuficiente ⇒ denegado **también para salidas**; cualquier input `None`/`NaN` ⇒ `<ARG>_MISSING` — nunca un default. |
 | **G6 Post‑fill honesto** (24) | exit_tanda postfill | fill total ⇒ `FILLED` con `filled/avg/fee`; parcial ⇒ `PARTIAL` con lo real; timeout ⇒ cancel + relectura ⇒ `NO_FILL_CANCELED` y **no** cuenta como trade; excepción en confirm ⇒ `UNKNOWN` + halt auto_clear + ledger; cancel que falla ⇒ `UNKNOWN`; cancel de orden ya llena ⇒ `FILLED`. |
 | **G7 Detectar ⇒ actuar** (6) | exit_tanda detect | ledger falla al escribir `ORDER_SENT` ⇒ no se envía + halt manual; reconcile encuentra abierto desconocido que aumenta exposición ⇒ cancelado + halt auto; que reduce ⇒ dejado + reporte; libro vacío ⇒ limpia solo halt auto; error por símbolo ⇒ no limpia. |
 | **G8 Snapshot de cuenta** (fix3, ~8) | cleanup fix3 | un dato de cuenta con edad > máx o status ≠ sincronizado se trata como **ausente** (denegar entrada con `ACCOUNT_SNAPSHOT_STALE`), nunca como el último valor bueno; salidas no dependen de él. |
 | **G9 Todo en llamas** (13) | exit_tanda fire | con halt + límites agotados + stats corruptas + kill switch **apagado**, una salida pasa; con kill switch encendido, no; con spread fuera de rango, tampoco. Es el test de la asimetría completa. |
 | **G10 Cero defaults** (nuevo, ~10) | — | por cada dato de entrada del ejecutor, el caso ausente ⇒ `DENIED/<DATO>_MISSING`; **equity/balance ausente nunca produce un tamaño** (el contraejemplo de §2 como test). |
-| **G11 Ledger** (nuevo, ~10) | — | append encadena y firma; `verify()` detecta una línea alterada, borrada o reordenada; escritura concurrente desde dos procesos no rompe la cadena; rotación (según decisión C) verificable desde el ancla. |
+| **G11 Ledger** (nuevo, ~14) | — | append encadena y firma; `verify()` detecta una línea alterada, borrada o reordenada; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
+| **G13 Escritor concurrente** (nuevo, ~8) | — | dos escritores simulados sobre `entry_halt.json`/`daily_stats.json`: el segundo detecta el sello cambiado ⇒ no escribe, `ConcurrentWriterDetected`, halt `CONCURRENT_WRITER_DETECTED` manual y ledger; conflicto sobre el propio `entry_halt.json` ⇒ el halt se escribe forzado; al arrancar con `writer_pid` ajeno vivo ⇒ detectado; con pid muerto ⇒ se toma la escritura y se anota. |
 | **G12 Reloj** (nuevo, ~4) | — | ningún módulo llama a `datetime.now/time.time` (test estático); rollover y timeout dependen solo del reloj inyectado. |
 
-Total estimado: **~130 aserciones**, de las cuales ~97 son las que ya existen reescritas y ~35 nuevas (kill
-switch, ledger, cero defaults, reloj) que hoy no tienen prueba propia. Lo que **no** viaja: risk‑exit por ATR,
+Total estimado: **~145 aserciones**, de las cuales ~97 son las que ya existen reescritas y ~48 nuevas (kill
+switch, ledger y rotación, cero defaults, reloj, escritor concurrente) que hoy no tienen prueba propia. Lo que **no** viaja: risk‑exit por ATR,
 TTL de posición, capital operativo, política de señal única, SPX, EMA, código muerto — es del sistema de origen.
 
 ---
@@ -349,12 +384,14 @@ TTL de posición, capital operativo, política de señal única, SPX, EMA, códi
    se lee como verbo: "gatekeep the order". Neutro, corto. Riesgo: connotación social negativa de
    "gatekeeping".
 
-Recomendación: **`bailout`** por la correspondencia exacta con el principio rector; segundo, `deadman`.
+**Decisión (2026-08-18): `deadman`.** `bailout` evoca rescate bancario; `gatekeep` tomó sentido coloquial
+negativo. `failclosed` nombra el principio y queda reservado para el principio, no para el paquete.
 
 ---
 
-## Decisiones pendientes (resumen)
-- **A** kill switch: solo sentinel (recomendado) o sentinel + JSON.
-- **B** `daily_stats` ilegible: fail‑closed para entradas (recomendado) o reset con aviso.
-- **C** rotación del ledger: nunca (simple) o anclada con `LEDGER_ROTATED` (recomendado).
-- **D** lock también en halt/stats: no en v0.1 (recomendado, "un escritor" documentado).
+## Decisiones tomadas (2026-08-18) — la spec queda cerrada
+- **A** kill switch: solo sentinel; existencia, nunca contenido; no parsea nada.
+- **B** `daily_stats` ilegible: fail‑closed SOLO para entradas; las salidas pasan sin leer el archivo.
+- **C** rotación anclada: `LEDGER_ROTATED` con `prev_last_hash` (== `prev_hash`) + `prev_sha256`; `verify` cruza archivos.
+- **D** sin locks de SO en halt/stats; detección de escritor concurrente por sello `(writer_pid, writer_started_at, write_seq)` ⇒ `CONCURRENT_WRITER_DETECTED`.
+- **Nombre**: `deadman`.
