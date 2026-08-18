@@ -26,10 +26,10 @@ Specification (the contract this code is written against):
 | `Intent` / `resolve_units` / exit predicates (`spot_long_only_is_exit` default, `net_position_is_exit`) | §4.3, §4.4 | done |
 | `DailyLimits` (net-of-fees P&L, UTC rollover ledgered, clock-backwards fail-closed, decision B) | §4.4 | done |
 | `OrderSanity` (+ `quantize`: floor only, never enlarge to a venue minimum) | §4.4 | done |
-| `BrokerPort`, `HonestExecutor` (post-fill state machine, `reconcile`) | §4.6, §5.3, §5.4 | pending (last) |
+| `BrokerPort` (G1-G9) + `HonestExecutor` (write-ahead, deterministic client_order_id, timeout ⇒ presumed alive, no blind retry, honest fills, `startup()` reconcile before any intent) | §4.6, §5.3, §5.4 | done |
 
 Conformance test groups implemented: G1 (kill switch), G2 (entry halt), G3 (units + exit
-predicates), G4 (daily limits), G5 (order sanity), G10 partial (zero defaults for G4/G5 inputs), G11 (ledger, anchoring, ANCHOR_STALE, rotation, two real processes), G12 (clock/paths),
+predicates), G4 (daily limits), G5 (order sanity), G6 (post-fill machine), G7 (detect ⇒ act / reconcile), G9 ("todo en llamas", incl. a real process killed mid-send), G10 partial, G11 (ledger, anchoring, ANCHOR_STALE, rotation, two real processes), G12 (clock/paths),
 G13 (concurrent writer). Run:
 
 ```bash

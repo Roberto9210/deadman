@@ -304,6 +304,25 @@ class HonestExecutor:
                   position_of: Callable[[str], PositionSnapshot | None]) -> ReconcileReport
 ```
 
+**Decisiones fail‑closed del ejecutor donde la spec callaba (2026‑08‑18, implementadas):**
+- `execute()` antes de `startup()` ⇒ `DENIED/STARTUP_RECONCILE_REQUIRED`. La reconciliación corre ANTES de aceptar intents.
+- **Write‑ahead**: `ORDER_SENT{stage:"write_ahead"}` con `client_order_id` **determinista** derivado del intent se
+  persiste ANTES de tocar la red. Un `client_order_id` no terminal en el ledger ⇒ `DENIED/DUPLICATE_IN_FLIGHT`:
+  reintentar sin estado terminal confirmado es doble exposición; la idempotencia va por `client_order_id`.
+- **Timeout en el envío** (`OrderMaybeSent`) ⇒ `ORDER_SENT{stage:"sent_no_ack"}` y la orden se **presume VIVA**;
+  se resuelve por `fetch_order_by_client_id` (G9): encontrada ⇒ sigue la máquina; `None` autoritativo ⇒
+  `INTENT_DENIED/BROKER_NEVER_ACCEPTED`; error ⇒ `UNKNOWN_STATE`. Una excepción que NO sea `OrderMaybeSent`
+  ni `BrokerRejected` no goza de G9: `None` ahí es `UNKNOWN_STATE`.
+- Fill duplicado (mismo id en `raw["fills"]`) se cuenta **una vez** y queda anotado en el `FILL`
+  (`duplicate_fill_ids_ignored`); `filled > requested` ⇒ `UNKNOWN_STATE`. Fee `None` viaja como `None` a
+  `DailyLimits` (peor caso o día no verificable), nunca 0.
+- `startup()`: cada `client_order_id` no terminal se consulta por client id y se resuelve uno a uno
+  (`never_sent`, `broker_never_accepted`, cancel+re‑read para entradas abiertas, se deja una salida abierta);
+  toda orden abierta en el broker que el ledger no conoce ⇒ `UNKNOWN_STATE` + halt (y cancel si añade exposición).
+  Cada discrepancia es una entrada del ledger; algo encontrado ⇒ halt `auto_clear`; nada y sin errores ⇒ se
+  limpia solo el halt `auto_clear`. Un halt es **pegajoso**: tras el primer `UNKNOWN_STATE` ninguna entrada
+  posterior llega al broker (probado en G9).
+
 **Orden de comprobaciones de `execute()`** (fijo; cada paso registra en el ledger su veredicto):
 
 1. `kill.check()` — aplica a todo. Bloqueado ⇒ `DENIED/KILL_SWITCH_*`.
@@ -373,6 +392,7 @@ Consecuencia obligatoria: ledger `UNKNOWN_STATE` con todo lo que se sabe, `halt.
 | `fetch_order(order_id, symbol) -> Order` | **G4**: `status` es uno de los cuatro literales; cualquier estado del broker no mapeable ⇒ `"unknown"` (nunca se inventa `closed`). **G5**: `filled` en base; `average` `None` si no hay fills; `fee_usd` `None` si el broker no lo reporta (no 0). |
 | `cancel_order(order_id, symbol) -> Order` | **G6**: devuelve el estado **tras** el intento; cancelar una orden ya llena no es error (devuelve `closed`). **G7**: si el broker rechaza el cancel por "ya no existe", devuelve `status="unknown"`, no levanta. |
 | `fetch_open_orders(symbol) -> list[Order]` | **G8**: lista completa para el símbolo o excepción; nunca una lista parcial silenciosa. |
+| `fetch_order_by_client_id(client_id, symbol) -> Order | None` | **G9** (añadida en el tramo del ejecutor): devuelve la orden o `None`; **`None` es una afirmación AUTORITATIVA de que el broker nunca aceptó una orden con ese client id**. Un adaptador que no pueda afirmarlo debe levantar excepción. Es lo que hace sobrevivible un timeout de envío sin doble exposición: el ejecutor no reintenta a ciegas, consulta por client id. |
 El adaptador **no** hace reintentos silenciosos: si reintenta, lo anota en `raw` y respeta G1. Un adaptador es
 conforme si pasa las pruebas de §6 con estas garantías. (El primer adaptador previsto es ccxt/Kraken spot; los
 `FakeExchange`/`FakeRouter` de los tests actuales son la referencia de forma.)
@@ -456,7 +476,7 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 | **G6 Post‑fill honesto** (24) | exit_tanda postfill | fill total ⇒ `FILLED` con `filled/avg/fee`; parcial ⇒ `PARTIAL` con lo real; timeout ⇒ cancel + relectura ⇒ `NO_FILL_CANCELED` y **no** cuenta como trade; excepción en confirm ⇒ `UNKNOWN` + halt auto_clear + ledger; cancel que falla ⇒ `UNKNOWN`; cancel de orden ya llena ⇒ `FILLED`. |
 | **G7 Detectar ⇒ actuar** (6) | exit_tanda detect | ledger falla al escribir `ORDER_SENT` ⇒ no se envía + halt manual; reconcile encuentra abierto desconocido que aumenta exposición ⇒ cancelado + halt auto; que reduce ⇒ dejado + reporte; libro vacío ⇒ limpia solo halt auto; error por símbolo ⇒ no limpia. |
 | **G8 Snapshot de cuenta** (fix3, ~8) | cleanup fix3 | un dato de cuenta con edad > máx o status ≠ sincronizado se trata como **ausente** (denegar entrada con `ACCOUNT_SNAPSHOT_STALE`), nunca como el último valor bueno; salidas no dependen de él. |
-| **G9 Todo en llamas** (13) | exit_tanda fire | con halt + límites agotados + stats corruptas + kill switch **apagado**, una salida pasa; con kill switch encendido, no; con spread fuera de rango, tampoco. Es el test de la asimetría completa. |
+| **G9 Todo en llamas** (13 + propiedades) | exit_tanda fire | **implementado como propiedades sobre el ledger**: FakeBroker fallando de todas las formas a la vez + proceso real matado a mitad de envío y rearrancado con `startup()`: ningún fill perdido, ninguna orden enviada dos veces, cada estado final explicable leyendo solo el ledger, cierre en halt explícito; con halt + límites agotados + stats corruptas + kill switch **apagado**, una salida pasa; con kill switch encendido, no; con spread fuera de rango, tampoco. Es el test de la asimetría completa. |
 | **G10 Cero defaults** (nuevo, ~10) | — | por cada dato de entrada del ejecutor, el caso ausente ⇒ `DENIED/<DATO>_MISSING`; **equity/balance ausente nunca produce un tamaño** (el contraejemplo de §2 como test). |
 | **G11 Ledger** (nuevo, ~18) | — | append encadena; `verify()` detecta una línea alterada, borrada o reordenada; **reescritura completa con recompute hasta el tip pasa la cadena pero cae por `ANCHOR_MISMATCH` cuando hay un ancla anterior; anclaje forzado tras `HALT_SET`/`KILL_ENGAGED`/`UNKNOWN_STATE`; publisher que falla ⇒ `ANCHOR_FAILED` y la ejecución sigue; **fallos sostenidos ⇒ `ANCHOR_STALE` + `anchor_stale.flag`, y el primer éxito posterior ⇒ `ANCHOR_RECOVERED` + marcador borrado**; `signer/verifier` opcionales funcionan con cualquier par de callables**; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
 | **G13 Escritor concurrente** (nuevo, ~8) | — | dos escritores simulados sobre `entry_halt.json`/`daily_stats.json`: el segundo detecta el sello cambiado ⇒ no escribe, `ConcurrentWriterDetected`, halt `CONCURRENT_WRITER_DETECTED` manual y ledger; conflicto sobre el propio `entry_halt.json` ⇒ el halt se escribe forzado; al arrancar con `writer_pid` ajeno vivo ⇒ detectado; con pid muerto ⇒ se toma la escritura y se anota. |
