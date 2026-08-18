@@ -1,0 +1,125 @@
+name: deadman release
+
+# Fires ONLY on version tags. A release goes through exactly the same suite as
+# CI (the CI workflow is reused, not copied), builds sdist + wheel, repeats the
+# clean-venv --no-deps smoke from a neutral cwd, and only then publishes to
+# PyPI via trusted publishing (OIDC). Zero tokens in secrets.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    # The tag MUST equal the version in packages/deadman/pyproject.toml.
+    # A mismatch fails here, loudly, before anything is built or published.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"                       # e.g. v0.1.0
+          PYVER="$(python - <<'EOF'
+          import tomllib
+          with open("packages/deadman/pyproject.toml", "rb") as f:
+              print(tomllib.load(f)["project"]["version"])
+          EOF
+          )"
+          echo "tag=${TAG}  pyproject=${PYVER}"
+          if [ "${TAG}" != "v${PYVER}" ]; then
+            echo "::error title=Tag/version mismatch::tag '${TAG}' does not match pyproject version 'v${PYVER}'. Fix the tag or bump pyproject; nothing was built or published."
+            exit 1
+          fi
+          echo "version=${PYVER}" >> "$GITHUB_OUTPUT"
+
+  suite:
+    # Same suite as CI: ubuntu/windows/macos x 3.10/3.12/3.14 + wheel smoke.
+    needs: check-version
+    uses: ./.github/workflows/deadman.yml
+
+  build-and-smoke:
+    needs: [check-version, suite]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/deadman
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - name: Build sdist + wheel
+        run: python -m build
+      - name: Assert built version == tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls dist
+          test -f "dist/deadman-${{ needs.check-version.outputs.version }}.tar.gz"
+          test -f "dist/deadman-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+      - name: Clean venv, --no-deps, neutral cwd, import + smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          WHEEL="$(pwd)/dist/deadman-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+          python -m venv "$RUNNER_TEMP/cleanvenv"
+          PY="$RUNNER_TEMP/cleanvenv/bin/python"
+          "$PY" -m pip install --quiet --no-deps "$WHEEL"
+          "$PY" -m pip check
+          cd "$RUNNER_TEMP"                                   # neutral cwd: the local source tree must NOT be importable
+          "$PY" - <<'EOF'
+          import sys, tempfile, deadman
+          assert "site-packages" in deadman.__file__, deadman.__file__
+          from deadman import *
+          root = tempfile.mkdtemp()
+          clock = FakeClock(); paths = Paths(root); ident = WriterIdentity(clock, pid=1)
+          ledger = Ledger(paths, clock, publisher=lambda d: "ref")
+          kill = KillSwitch(paths, ledger); halt = EntryHalt(paths, clock, ident, ledger)
+          assert kill.check().allowed and halt.active() is None
+          halt.set("smoke", "release"); assert halt.active() is not None
+          r = resolve_units(Intent("BTC/USD", "buy", "USD", 10.0, "ENTRY", "smoke"), 100.0)
+          assert abs(r.amount_base - 0.1) < 1e-12
+          rep = ledger.verify(); assert rep.ok and rep.chain_complete
+          mods = {m.split('.')[0] for m in list(sys.modules) if not m.startswith('_')}
+          third = [m for m in mods if m not in sys.stdlib_module_names and m != 'deadman' and not m.startswith('encodings')]
+          assert third == [], third
+          print("smoke ok from", deadman.__file__, "| version", deadman.__version__, "| non-stdlib modules:", third)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deadman-release-dist
+          path: packages/deadman/dist/*
+          if-no-files-found: error
+
+  publish:
+    # Trusted publishing (PyPI OIDC): the "release" environment must be
+    # configured on GitHub and the publisher registered on PyPI for
+    # repo/workflow release.yml/environment release. No API token anywhere.
+    needs: [check-version, suite, build-and-smoke]
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/project/deadman/${{ needs.check-version.outputs.version }}/
+    permissions:
+      id-token: write   # OIDC for trusted publishing
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deadman-release-dist
+          path: dist
+      - name: Publish to PyPI (trusted publishing, no tokens)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          verbose: true

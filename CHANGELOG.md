@@ -1,5 +1,14 @@
 # Changelog
 
+Release process (every version): a release is cut ONLY from a git tag `vX.Y.Z` that must equal
+`project.version` in `pyproject.toml` (the release workflow fails loudly on a mismatch, before building).
+The tag runs the **same suite as CI** (`.github/workflows/deadman.yml` reused via `workflow_call`:
+ubuntu/windows/macos × Python 3.10/3.12/3.14, real-process tests unmarked, the single platform skip
+visible), then builds sdist + wheel with `python -m build`, installs the wheel into a clean venv with
+`--no-deps` from a neutral cwd and runs a smoke flow asserting zero non-stdlib modules loaded, and only
+then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
+`release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`.
+
 ## 0.1.0 — 2026-08-18
 
 First release. Implements `docs/safety_kit/SPEC.md` v0.1 (closed 2026-08-18).

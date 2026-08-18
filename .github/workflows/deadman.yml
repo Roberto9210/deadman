@@ -6,6 +6,7 @@ on:
   pull_request:
     paths: ["packages/deadman/**", ".github/workflows/deadman.yml"]
   workflow_dispatch:
+  workflow_call:      # reused as-is by release.yml: a release runs the SAME suite as CI
 
 defaults:
   run:
