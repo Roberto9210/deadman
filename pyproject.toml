@@ -13,7 +13,7 @@ readme = "README.md"
 # anything newer. Tested on 3.10-3.14 in CI.
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Roberto Rodriguez" }]
+authors = [{ name = "Roberto9210" }]
 keywords = ["trading", "safety", "kill-switch", "ledger", "fail-closed", "execution"]
 classifiers = [
     "Development Status :: 4 - Beta",

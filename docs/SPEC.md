@@ -7,8 +7,8 @@ connotaciones. Decidido 2026-08-18; `failclosed` queda como nombre del principio
 `deadman`: primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
 de estrategia. Este documento fijó el contrato ANTES de escribir código (v0.1 cerrada 2026-08-18) y desde
 entonces se mantiene como la referencia contra la que se implementa. **Estado al 2026-08-18: implementada
-en la raíz de este repositorio (v0.1.0; originalmente `packages/deadman` del sistema de origen). Conformidad exacta en §6b — no "12/12".** Base:
-`reports/safety_kit_extraction_inventory_20260818.md`.
+en la raíz de este repositorio (v0.1.0). Conformidad exacta en §6b — no "12/12".** Nació de un inventario de
+extracción de la capa de seguridad de un sistema de trading real (documento interno de ese sistema, no público).
 
 Lector objetivo: alguien que nunca vio el sistema del que esto sale. Donde una decisión no puede
 fijarse sin decidir implementación, está marcada **DECISIÓN PENDIENTE** con opciones y costo.
@@ -65,7 +65,7 @@ avisando), porque no evaluar una salida es un riesgo mayor que evaluarla mal. Ej
 hay volatilidad para calcular un stop, se evalúa con un umbral conservador declarado y se anota
 `FALLBACK`; **nunca** se deja de evaluar.
 
-**El contraejemplo que NO se importa.** En el código de origen, `core/exposure_engine.py:81` hace
+**El contraejemplo que NO se importa.** En el código de origen, el motor de exposición hace
 `equity = max(equity, 1.0)` cuando no hay balances: sin datos de cuenta, el motor cree tener $1 de
 equity, calcula un tamaño como porcentaje de eso, y la orden muere aguas abajo por
 `MIN_NOTIONAL_BLOCK` con un motivo que no dice la verdad ("orden demasiado chica") en vez de la causa
