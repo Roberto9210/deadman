@@ -4,18 +4,47 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deadman"
-version = "0.1.0.dev0"
-description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill, hash-chained + externally anchored ledger. Zero dependencies."
+version = "0.1.0"
+description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill state machine, hash-chained and externally anchored ledger. Zero runtime dependencies."
 readme = "README.md"
-requires-python = ">=3.11"
+# Floor 3.10, and why: PEP 604 unions (`X | None`) are used at runtime in
+# signatures throughout the package; `sys.stdlib_module_names` (used by the
+# zero-dependency conformance test) exists since 3.10. Nothing here needs
+# anything newer. Tested on 3.10-3.14 in CI.
+requires-python = ">=3.10"
 license = { text = "MIT" }
-dependencies = []  # zero external dependencies by design (SPEC §2b)
+authors = [{ name = "Roberto9210" }]
+keywords = ["trading", "safety", "kill-switch", "ledger", "fail-closed", "execution"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+# ZERO runtime dependencies by design (SPEC §2b). Proven, not stated:
+# tests/test_g12_clock_and_paths.py::test_package_imports_only_stdlib_and_itself
+# scans every import, and CI installs the built wheel into a clean venv with
+# --no-deps and runs an import + minimal execution.
+dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
 
+[project.urls]
+Specification = "https://github.com/Roberto9210/ALAYA/blob/main/docs/safety_kit/SPEC.md"
+
 [tool.setuptools.packages.find]
 include = ["deadman*"]
+exclude = ["tests*", "examples*"]
+
+[tool.setuptools.package-data]
+deadman = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

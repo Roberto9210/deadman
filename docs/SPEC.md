@@ -5,8 +5,10 @@ todo está bien. Nombra la garantía central, es término real de ingeniería de
 connotaciones. Decidido 2026-08-18; `failclosed` queda como nombre del principio (§2), no del paquete.
 
 `deadman`: primitivas de seguridad de ejecución para sistemas de trading automatizados, agnósticas de broker y
-de estrategia. Este documento fija el contrato ANTES de escribir código. Nada de lo que sigue está
-implementado. Base: `reports/safety_kit_extraction_inventory_20260818.md`.
+de estrategia. Este documento fijó el contrato ANTES de escribir código (v0.1 cerrada 2026-08-18) y desde
+entonces se mantiene como la referencia contra la que se implementa. **Estado al 2026-08-18: implementada
+en `packages/deadman` (v0.1.0). Conformidad exacta en §6b — no "12/12".** Base:
+`reports/safety_kit_extraction_inventory_20260818.md`.
 
 Lector objetivo: alguien que nunca vio el sistema del que esto sale. Donde una decisión no puede
 fijarse sin decidir implementación, está marcada **DECISIÓN PENDIENTE** con opciones y costo.
@@ -173,6 +175,18 @@ Cada pieza responde a un fallo real observado en el sistema de origen. Se citan 
 ---
 
 ## 4. La API (10 nombres + 2 predicados)
+
+**Reconciliación con lo exportado (2026-08-18).** Los 10 nombres de la spec —`Paths, KillSwitch, EntryHalt,
+Intent, resolve_units, DailyLimits, OrderSanity, Ledger, BrokerPort, HonestExecutor`— y los 2 predicados
+—`spot_long_only_is_exit, net_position_is_exit`— están en `deadman.__all__`, uno a uno. Divergencias
+anotadas y resueltas: `SignedLedger` fue el nombre del primer commit y queda como alias de `Ledger` (§2b lo
+renombró al quitar la firma obligatoria); el resto de `__all__` son los tipos de soporte que la spec ya
+nombra en las firmas (`Verdict, Resolved, PositionSnapshot, Limits, DailyStats, QuantizeResult, Order,
+BrokerRejected, ExecResult, ReconcileReport, Entry, Anchor, VerifyReport, HaltRecord, StateFile,
+WriterIdentity, Seal, Clock/SystemClock/FakeClock`), más `client_order_id_for` (la derivación determinista
+del §4.6, expuesta para que un adaptador pueda reconciliar por client id) y las constantes `KINDS,
+ANCHOR_AFTER, GENESIS_HASH, ORDER_STATUSES`. Un test estático (`tests/test_g12_clock_and_paths.py::
+test_public_api_matches_spec`) mantiene esta lista honesta.
 
 Pseudocódigo con firmas completas. Tipos: `Verdict(allowed: bool, reason: str, code: str)`; `code` es
 un identificador estable en MAYÚSCULAS (`KILL_SWITCH_ACTIVE`, `ENTRY_HALT_ACTIVE`, `INTENT_UNITS_INVALID`,
@@ -482,8 +496,47 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 | **G13 Escritor concurrente** (nuevo, ~8) | — | dos escritores simulados sobre `entry_halt.json`/`daily_stats.json`: el segundo detecta el sello cambiado ⇒ no escribe, `ConcurrentWriterDetected`, halt `CONCURRENT_WRITER_DETECTED` manual y ledger; conflicto sobre el propio `entry_halt.json` ⇒ el halt se escribe forzado; al arrancar con `writer_pid` ajeno vivo ⇒ detectado; con pid muerto ⇒ se toma la escritura y se anota. |
 | **G12 Reloj** (nuevo, ~4) | — | ningún módulo llama a `datetime.now/time.time` (test estático); rollover y timeout dependen solo del reloj inyectado. |
 
-Total estimado: **~150 aserciones**, de las cuales ~97 son las que ya existen reescritas y ~48 nuevas (kill
-switch, ledger y rotación, cero defaults, reloj, escritor concurrente) que hoy no tienen prueba propia. Lo que **no** viaja: risk‑exit por ATR,
+Total estimado (al escribir la spec): **~150 aserciones**, de las cuales ~97 son las que ya existen reescritas y
+~48 nuevas (kill switch, ledger y rotación, cero defaults, reloj, escritor concurrente).
+
+### 6b. Conformidad implementada — afirmación exacta (2026-08-18, `packages/deadman` v0.1.0)
+
+**Implementados: 11 de los 13 grupos, 165 casos de prueba recolectados por pytest (164 pasan, 1 skip con
+justificación de plataforma escrita en el propio test), en `packages/deadman/tests/`:**
+
+| Grupo | Archivo | Casos | Estado |
+|---|---|---|---|
+| G1 Kill switch | `test_g1_kill_switch.py` | 9 | implementado |
+| G2 Entry halt | `test_g2_entry_halt.py` | 9 | implementado |
+| G3 Unidades + predicados | `test_g3_units.py` | 27 | implementado |
+| G4 Límites diarios | `test_g4_daily_limits.py` | 15 | implementado |
+| G5 Cordura de orden | `test_g5_order_sanity.py` | 37 (1 skip: `broker_status` es string; `NaN` no es su forma de "ausente") | implementado |
+| G6 Post‑fill honesto | `test_g6_g7_executor.py` | 17 | implementado |
+| G7 Detectar ⇒ actuar | `test_g6_g7_executor.py` | 12 | implementado |
+| G9 Todo en llamas | `test_g9_todo_en_llamas.py` | 2 (propiedades sobre el ledger; incluye proceso real matado a mitad de envío) | implementado |
+| G10 Cero defaults | repartido en G3/G4/G5 (`test_g10_*` dentro de cada archivo) | ~20 | **implementado para todo dato de entrada del kit**; ver exclusión abajo |
+| G11 Ledger | `test_g11_ledger.py` | 23 (incluye dos procesos reales) | implementado |
+| G12 Reloj / Paths / API / cero deps | `test_g12_clock_and_paths.py` | 6 (reloj estático, paths, `__all__` == spec, solo stdlib) | implementado |
+| G13 Escritor concurrente | `test_g13_concurrent_writer.py` | 8 | implementado |
+
+**Declarados FUERA DE ALCANCE por diseño (2 elementos), con fundamento:**
+
+- **G8 Snapshot de cuenta (`ACCOUNT_SNAPSHOT_STALE`)** — no implementado. El kit **no tiene noción de
+  cuenta ni de equity**: no dimensiona posiciones, no lee balances, no mantiene un snapshot. Lo único que
+  consume de la cuenta es `size_available` en `OrderSanity.check()`, que el llamador entrega por llamada y
+  que, si falta, deniega (`SIZE_AVAILABLE_MISSING`, cubierto por G10). La regla de G8 —"un dato con edad >
+  máx o status ≠ sincronizado se trata como ausente, nunca como el último valor bueno"— es del sistema que
+  produce ese dato (el adaptador/estrategia del usuario), no de esta librería. Se documenta como
+  responsabilidad del llamador en el README; **no se afirma conformidad**.
+- **G10, la mitad "equity ausente nunca produce un tamaño"** — no implementado como test propio porque el
+  kit **no tiene ejecutor con equity ni sizing**: no hay ninguna función en `deadman` que reciba equity y
+  devuelva un tamaño, así que el contraejemplo `equity = max(equity, 1.0)` de §2 no tiene dónde ocurrir. Lo
+  que sí está probado es su forma general para cada dato de entrada del kit (`<DATO>_MISSING`) y su gemelo
+  en `OrderSanity`: una orden bajo el mínimo del venue se deniega, jamás se agranda (`test_g5_5_*`). El
+  sizing es del usuario; el principio de §2 le aplica y el kit no puede probarlo por él.
+
+Nada más está fuera. La afirmación pública es: **11 grupos implementados, 165 casos, 2 elementos fuera de
+alcance con fundamento — no "12/12".** Lo que **no** viaja: risk‑exit por ATR,
 TTL de posición, capital operativo, política de señal única, SPX, EMA, código muerto — es del sistema de origen.
 
 ---

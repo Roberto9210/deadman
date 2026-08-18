@@ -1,0 +1,77 @@
+name: deadman
+
+on:
+  push:
+    paths: ["packages/deadman/**", ".github/workflows/deadman.yml"]
+  pull_request:
+    paths: ["packages/deadman/**", ".github/workflows/deadman.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: packages/deadman
+
+jobs:
+  test:
+    # Windows is NOT optional: the msvcrt.LK_NBLCK finding (LK_LOCK gives up
+    # after 10 internal retries with an OSError that is not a PermissionError)
+    # is a claim only a Windows run keeps honest. Real-process tests (G9 kill
+    # mid-send, G11 two writers) run here unmarked; nothing is slow-skipped.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test deps only (the package itself has none)
+        run: python -m pip install --upgrade pip pytest
+      - name: Full suite (the single skip must be visible with its reason)
+        run: python -m pytest -q -rs tests
+
+  wheel:
+    # "Zero dependencies" needs proof like everything else: build the wheel,
+    # install it into a CLEAN venv with --no-deps, import, run a minimal flow.
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python -m build
+      - name: Clean venv install and smoke run
+        shell: bash
+        run: |
+          python -m venv /tmp/cleanvenv
+          if [ -f /tmp/cleanvenv/bin/python ]; then PY=/tmp/cleanvenv/bin/python; else PY=/tmp/cleanvenv/Scripts/python.exe; fi
+          $PY -m pip install --no-deps dist/deadman-*.whl
+          $PY -m pip check
+          $PY -c "import deadman, sys; print(deadman.__version__); assert deadman.__file__.find('site-packages')>=0"
+          $PY - <<'EOF'
+          import tempfile
+          from deadman import *
+          root = tempfile.mkdtemp()
+          clock = FakeClock(); paths = Paths(root); ident = WriterIdentity(clock, pid=1)
+          ledger = Ledger(paths, clock, publisher=lambda d: "ref")
+          kill = KillSwitch(paths, ledger); halt = EntryHalt(paths, clock, ident, ledger)
+          assert kill.check().allowed and halt.active() is None
+          halt.set("smoke", "ci"); assert halt.active() is not None
+          r = resolve_units(Intent("BTC/USD", "buy", "USD", 10.0, "ENTRY", "smoke"), 100.0)
+          assert abs(r.amount_base - 0.1) < 1e-12
+          rep = ledger.verify(); assert rep.ok and rep.chain_complete
+          print("smoke ok: entries", rep.entries_checked, "anchors", rep.anchors_checked)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deadman-dist-${{ matrix.os }}
+          path: packages/deadman/dist/*

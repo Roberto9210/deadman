@@ -1,44 +1,137 @@
 # deadman
 
-Execution-safety primitives for automated trading systems. Broker-agnostic,
-strategy-agnostic. The machine stops when nobody can vouch that everything is
-fine — and an exit is never trapped.
+**deadman sits between your strategy and your broker, and when it meets the unknown it stops instead of guessing.**
 
-Zero external dependencies (stdlib only) — see the threat model in SPEC §2b:
-the hash chain detects corruption; the guarantee against deliberate rewrite is an
-external ANCHOR (seq, hash) published to a third party the operator does not
-control (a remote you can force-push is not one). Sustained anchor failure raises
-`ANCHOR_STALE` + a visible `anchor_stale.flag`; it never halts execution. Signing is optional and the key is yours.
+Execution-safety primitives for automated trading systems. Zero runtime dependencies. Broker-agnostic,
+strategy-agnostic. Every claim below has a test or a spec section behind it — the links are the argument.
 
-Specification (the contract this code is written against):
-`../../docs/safety_kit/SPEC.md` (v0.1, closed 2026-08-18).
+Specification: [`docs/safety_kit/SPEC.md`](../../docs/safety_kit/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
+Conformance statement, exact: **11 of 13 test groups implemented, 165 collected cases (164 pass, 1 platform skip
+with its reason in the test), 2 elements declared out of scope with rationale** — see [SPEC §6b](../../docs/safety_kit/SPEC.md).
+Not "12/12".
 
-## Status
+## What it is not — said first, without shame
 
-| Piece | Spec | State |
-|---|---|---|
-| `Paths(root)` | §5.1 | done |
-| `Clock` / `SystemClock` / `FakeClock` | §5.6 | done |
-| `StateFile` + writer seal (`ConcurrentWriterDetected`) | §5.2, §5.7 (D) | done |
-| `Ledger` (hash chain, OS lock, anchored rotation, external anchoring via `publisher`, optional `signer/verifier` hooks, `verify`) | §2b, §4.5, §5.5 (C) | done |
-| `EntryHalt` | §4.2, decisions B/D | done |
-| `KillSwitch` (existence only, never parsed) | §4.1, decision A | done |
-| `Intent` / `resolve_units` / exit predicates (`spot_long_only_is_exit` default, `net_position_is_exit`) | §4.3, §4.4 | done |
-| `DailyLimits` (net-of-fees P&L, UTC rollover ledgered, clock-backwards fail-closed, decision B) | §4.4 | done |
-| `OrderSanity` (+ `quantize`: floor only, never enlarge to a venue minimum) | §4.4 | done |
-| `BrokerPort` (G1-G9) + `HonestExecutor` (write-ahead, deterministic client_order_id, timeout ⇒ presumed alive, no blind retry, honest fills, `startup()` reconcile before any intent) | §4.6, §5.3, §5.4 | done |
+deadman does **not** bring a strategy, signals, a market-data feed, a broker connection, position sizing,
+paper accounting, or any notion of your account's equity. You pass it a `BrokerPort` adapter (five
+methods, [guarantees G1–G9](../../docs/safety_kit/SPEC.md)) and an `Intent`; it returns allowed/denied with a
+code, and — if asked — runs the post-fill sequence honestly. Everything it needs to decide it receives in
+the call. Nothing it needs is guessed.
 
-Conformance test groups implemented: G1 (kill switch), G2 (entry halt), G3 (units + exit
-predicates), G4 (daily limits), G5 (order sanity), G6 (post-fill machine), G7 (detect ⇒ act / reconcile), G9 ("todo en llamas", incl. a real process killed mid-send), G10 partial, G11 (ledger, anchoring, ANCHOR_STALE, rotation, two real processes), G12 (clock/paths),
-G13 (concurrent writer). Run:
+## Threat model, in plain words
 
-```bash
-python -m pytest -q packages/deadman/tests
+- The **external anchor is the guarantee**: the ledger tip `(seq, hash)` is published to a third party the
+  operator does not control. Everything before the latest anchor is dated by that third party and provably
+  unchanged.
+- The **local hash chain is the mechanism**: it detects corruption, partial writes, buggy rewrites,
+  deletions, reordering, broken rotation — and it is what lets 64 bytes cover the whole history.
+- **Signing is optional** and the key is yours (`signer`/`verifier` callables). With the key on the same disk
+  as the ledger, a signature adds nothing over the chain; the library does not pretend otherwise.
+
+The two tests that show the library's own limit, next to each other:
+[`test_full_rewrite_with_recompute_passes_the_chain_alone`](tests/test_g11_ledger.py) — an attacker with
+disk access rewrites an entry, recomputes the chain to the tip and replaces the tip file: **the chain
+verifies** — and
+[`test_same_rewrite_is_caught_by_an_external_anchor`](tests/test_g11_ledger.py) — the same rewrite, plus the
+attacker wiping the local anchors file, is caught by `verify(anchors=…)` with the anchors held by the third
+party (`ANCHOR_MISMATCH`).
+
+**What counts as a third party** ([SPEC §2b](../../docs/safety_kit/SPEC.md)): a git branch **protected against
+force-push and deletion for everyone including the owner**, or an **RFC 3161 timestamp authority**, or a
+third-party append-only service with server-side timestamps. A remote you can force-push is not one — the
+anchor is then worth nothing over the local chain. Sustained publisher failure is not silent:
+`ANCHOR_STALE` in the ledger + a visible `anchor_stale.flag`, recovered by the next success
+([test](tests/test_g11_ledger.py) `test_sustained_anchor_failure_raises_stale_flag_and_recovers`).
+An example publisher (git push to a protected branch) is in [`examples/`](examples/) — it is your code; the
+library never touches the network.
+
+## The primitives, each with the bug that motivated it
+
+These are patterns from a real system, kept as patterns. They are the reason the library exists.
+
+| Primitive | The bug | What deadman does instead | Proof |
+|---|---|---|---|
+| **KillSwitch** | The stop sentinel depended on a service that had been dead for months. | The mere **existence** of one file stops entries and exits; the file is never opened or parsed (a parse is one more failure mode); any error while checking also stops. | [G1](tests/test_g1_kill_switch.py) — incl. a spy proving `open()` is never called on the sentinel |
+| **EntryHalt** | An unknown order state in one cycle was forgotten in the next. | Persistent on disk, blocks **new exposure only**, never a close; unreadable file = halted; cleared by a reconcile that sees an empty book or by a human. | [G2](tests/test_g2_entry_halt.py), [G13](tests/test_g13_concurrent_writer.py) |
+| **Exit predicate** (`spot_long_only_is_exit`, `net_position_is_exit`) | Daily limits, "eligibility" and a disabled policy trapped open positions. And **the February stop-loss was handling August exits**: exit thresholds came from a parameter bank frozen months earlier. | The asymmetry is a *policy over an injectable predicate*; only the kill switch and order sanity may stop an exit. The default is declared spot long-only; futures/shorts must pass a net-position predicate. | [G3](tests/test_g3_units.py), [G4](tests/test_g4_daily_limits.py), [G9](tests/test_g9_todo_en_llamas.py) |
+| **Intent / resolve_units** | A quantity travelled in a bare `amount` with no unit; "sell the whole position" sold a USD figure at a stale price. | `units ∈ {USD, BASE, CONTRACTS}` is mandatory; nothing is inferred; every failure names the missing datum and carries the intent. | [G3](tests/test_g3_units.py) |
+| **DailyLimits** | A capital key that did not exist in the config was read with **default 100 → the per-trade risk cap was a fixed $2** for months. And a paper run reported **+$0.29 gross as "the result"** while the net of fees was negative. | A missing key denies naming the key — never a default. P&L is **net of fees**; an unknown fee never counts as zero (worst case, or the day is marked unverified and entries stop). Rollover only via the injected clock, ledgered; a clock going backwards is fail-closed. Unreadable stats block entries only — exits are evaluated **before** the file is read. | [G4](tests/test_g4_daily_limits.py) `test_g4_7_*`, `test_g4_4_*`, `test_g4_6_*`, `test_g4_9_*` |
+| **OrderSanity** | A feed-freshness check read a key **no producer ever wrote**, so it always said NOMINAL. And `equity = max(equity, 1.0)` turned "I don't know how much money there is" into "order too small". | Only inputs the caller passes in the call; any `None`/`NaN` denies as `<ARG>_MISSING`. `quantize()` floors to the venue step, entries and exits alike; an order below the venue minimum is **denied, never enlarged**. | [G5](tests/test_g5_order_sanity.py) `test_g5_5_below_min_notional_is_denied_not_enlarged`, `test_g10_*` |
+| **Ledger** | Records could be edited, and part of the history had been summarised with later data. A rotation left a segment that no longer chained to genesis. | Hash chain + atomic writes + OS lock; anchored rotation (`LEDGER_ROTATED` carries the previous file's last hash and sha256); `verify()` crosses segments and never says plain OK when one is missing. Zero deps. | [G11](tests/test_g11_ledger.py) — incl. two real processes appending |
+| **HonestExecutor** | The adapter declared success on send, not on fill; a timeout counted as a trade; **an order stayed alive with no owner after a timeout**. | Write-ahead intent with a deterministic client order id **before** the network; timeout ⇒ the order is **presumed alive** and resolved by client id — never re-sent; partial is partial, duplicate fills counted once and noted; anything outside the state machine ⇒ `UNKNOWN_STATE` + halt; `startup()` reconciles before any intent is accepted. | [G6/G7](tests/test_g6_g7_executor.py), [G9](tests/test_g9_todo_en_llamas.py) — incl. a real process killed mid-send |
+| **Injectable clock** | A `now()` nobody controlled made a daily rollover and an outcome window irreproducible. | Every primitive receives a `Clock`; no module calls the wall clock (static test). | [G12](tests/test_g12_clock_and_paths.py) |
+| **Writer seal** | Two adapters once ran at the same time against the same state. | Every state file carries `(writer_pid, writer_started_at, write_seq)`; a changed seal between read and write is `CONCURRENT_WRITER_DETECTED` — not prevented, made loud. | [G13](tests/test_g13_concurrent_writer.py) |
+
+The principle behind all of it — *zero plausible defaults* — is a contract, not a slogan: [SPEC §2](../../docs/safety_kit/SPEC.md).
+
+## What this library does not protect against
+
+This section is what makes the rest credible.
+
+- **A deliberate rewrite of the ledger by someone with disk access, when no external anchor covers it.**
+  The chain alone verifies after a recompute — proven, not hidden:
+  [`test_full_rewrite_with_recompute_passes_the_chain_alone`](tests/test_g11_ledger.py). Only an anchor held
+  by a real third party catches it ([`test_same_rewrite_is_caught_by_an_external_anchor`](tests/test_g11_ledger.py)),
+  and only for history before that anchor.
+- **Anything after the latest anchor.** The window equals your anchoring interval; that is why anchors are
+  forced after halts, unknowns and kill events ([`test_anchor_forced_after_safety_events_and_by_count`](tests/test_g11_ledger.py)).
+- **A remote you can force-push.** It is not a third party; see above.
+- **Two writers racing on a state file.** Not prevented (no OS lock on halt/stats in 0.1) — detected and
+  escalated to a halt ([G13](tests/test_g13_concurrent_writer.py)).
+- **A broker adapter that lies.** `BrokerPort` guarantees G1–G9 are the adapter's job; if `fetch_order`
+  invents "closed" for an unmappable state, or `fetch_order_by_client_id` returns `None` without being
+  authoritative, deadman will believe it. The conformance tests ([`tests/fake_broker.py`](tests/fake_broker.py)
+  is the reference shape) are how you check an adapter.
+- **Your account and your sizing.** deadman has no equity, no positions of its own, no snapshot of your
+  account. `size_available` is whatever you pass; a stale balance you pass as fresh is your stale balance
+  (SPEC G8 is out of scope for this reason — [SPEC §6b](../../docs/safety_kit/SPEC.md)).
+- **Losing money.** It stops you from acting on what it cannot vouch for. It does not know whether your
+  strategy has an edge.
+
+## Quickstart (honest: this is the whole flow)
+
+```python
+from deadman import (Paths, SystemClock, WriterIdentity, Ledger, KillSwitch, EntryHalt,
+                     DailyLimits, Limits, OrderSanity, HonestExecutor, Intent, spot_long_only_is_exit)
+
+clock = SystemClock()
+paths = Paths("/var/lib/mybot/deadman")            # one explicit root for every state file
+ident = WriterIdentity(clock)
+
+ledger = Ledger(paths, clock, publisher=my_publisher)   # my_publisher: see examples/git_anchor_publisher.py
+kill   = KillSwitch(paths, ledger)                       # `touch /var/lib/mybot/deadman/kill_switch.enabled` stops everything
+halt   = EntryHalt(paths, clock, ident, ledger)
+halt.startup_check()                                     # another live process owns the halt file? -> loud
+limits = DailyLimits(paths, Limits(max_trades_per_day=20, max_daily_loss_usd=50.0, worst_case_fee_bps=80.0),
+                     spot_long_only_is_exit, clock, ident, ledger)
+sanity = OrderSanity(allowed_symbols=frozenset({"BTC/USD"}), max_latency_ms=500, max_spread_bps=20)
+
+ex = HonestExecutor(my_broker_port, kill, halt, limits, sanity, ledger, spot_long_only_is_exit, clock,
+                    fill_timeout_s=10.0, poll_interval_s=1.0)
+report = ex.startup(["BTC/USD"], position_of=lambda sym: None)   # reconcile BEFORE any intent; halts if it finds anything
+
+intent = Intent(symbol="BTC/USD", side="buy", units="USD", amount=25.0, kind="ENTRY", client_id="sig-2026-08-18-001")
+result = ex.execute(intent, price=64_000.0, broker_status="connected", latency_ms=42.0,
+                    bid=63_995.0, ask=64_005.0, size_available=1_000.0)
+print(result.status, result.code, result.reason)   # FILLED | PARTIAL | NO_FILL_CANCELED | DENIED | UNKNOWN
+print(ledger.verify())                              # the ledger alone explains every final state
 ```
 
-## Principle
+`my_broker_port` is your adapter implementing `BrokerPort` (five methods). `my_publisher` is your anchor
+publisher. Neither is provided: the library does not talk to the network.
 
-Zero plausible defaults. Missing data for anything that adds exposure ⇒
-denied with a code that names the missing datum. Doubt about anything that
-reduces exposure ⇒ let it out, with a declared conservative value and a note.
-Nothing here guesses.
+## Install and test
+
+```bash
+pip install deadman            # zero runtime dependencies
+python -m pytest -q packages/deadman/tests   # 165 cases; Windows, Linux, macOS in CI
+```
+
+CI: `.github/workflows/deadman.yml` — ubuntu/windows/macos × Python 3.10/3.12/3.14, plus a job that builds
+the wheel, installs it into a clean venv with `--no-deps` and runs a smoke flow. Windows is not optional there:
+the `msvcrt.LK_NBLCK` finding (`LK_LOCK` gives up with an `OSError` that is not a `PermissionError`) is a
+claim only a Windows run keeps honest.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Changes: [CHANGELOG.md](CHANGELOG.md).

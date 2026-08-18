@@ -47,3 +47,48 @@ def test_paths_unwritable_raises(tmp_path):
     f.write_text("x")
     with pytest.raises(PathsNotWritable):
         Paths(f / "under_a_file")
+
+
+SPEC_NAMES = ["Paths", "KillSwitch", "EntryHalt", "Intent", "resolve_units", "DailyLimits", "OrderSanity",
+              "Ledger", "BrokerPort", "HonestExecutor", "spot_long_only_is_exit", "net_position_is_exit"]
+
+
+def test_public_api_matches_spec():
+    """SPEC §4: the 10 names + 2 predicates are exported one to one; the rest of __all__
+    are the support types the spec names in signatures (kept explicit here so a rename
+    on either side fails loudly)."""
+    import deadman
+    for n in SPEC_NAMES:
+        assert n in deadman.__all__ and hasattr(deadman, n), n
+    support = {"Clock", "SystemClock", "FakeClock", "Verdict", "StateFile", "WriterIdentity", "Seal",
+               "SignedLedger", "Entry", "Anchor", "VerifyReport", "KINDS", "GENESIS_HASH", "ANCHOR_AFTER",
+               "HaltRecord", "Resolved", "PositionSnapshot", "ExposurePredicate", "Limits", "DailyStats",
+               "QuantizeResult", "Order", "BrokerRejected", "ORDER_STATUSES", "ExecResult", "ReconcileReport",
+               "client_order_id_for", "errors"}
+    assert set(deadman.__all__) == set(SPEC_NAMES) | support
+
+
+def test_package_imports_only_stdlib_and_itself():
+    """Zero runtime dependencies (SPEC §2b) and nothing from the origin system (core/):
+    static scan of every import statement in the package."""
+    import ast
+    import sys
+    stdlib = set(sys.stdlib_module_names)
+    bad = []
+    for fn in os.listdir(PKG):
+        if not fn.endswith(".py"):
+            continue
+        tree = ast.parse(open(os.path.join(PKG, fn), encoding="utf-8").read())
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if node.level and node.level > 0:
+                    continue  # relative import inside the package
+                names = [node.module or ""]
+            for n in names:
+                top = n.split(".")[0]
+                if top and top not in stdlib and top != "deadman":
+                    bad.append((fn, n))
+    assert bad == [], bad
