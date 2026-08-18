@@ -8,7 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from deadman import Paths, FakeClock, WriterIdentity, SignedLedger  # noqa: E402
+from deadman import Paths, FakeClock, WriterIdentity, Ledger  # noqa: E402
 
 
 @pytest.fixture
@@ -28,4 +28,4 @@ def ident(clock):
 
 @pytest.fixture
 def ledger(paths, clock):
-    return SignedLedger(paths, clock)
+    return Ledger(paths, clock)

@@ -1,16 +1,16 @@
 """deadman - execution-safety primitives for automated trading systems.
 See docs/safety_kit/SPEC.md (v0.1). Implemented so far: Paths, clocks,
-StateFile (writer seal), SignedLedger (anchored rotation), EntryHalt, KillSwitch."""
+StateFile (writer seal), Ledger (hash chain, anchored rotation, external anchoring; zero deps), EntryHalt, KillSwitch."""
 from .clock import Clock, SystemClock, FakeClock
 from .paths import Paths
 from .verdict import Verdict
 from .statefile import StateFile, WriterIdentity, Seal
-from .ledger import SignedLedger, Entry, VerifyReport, KINDS, GENESIS_HASH
+from .ledger import Ledger, SignedLedger, Entry, Anchor, VerifyReport, KINDS, GENESIS_HASH, ANCHOR_AFTER
 from .entry_halt import EntryHalt, HaltRecord
 from .kill_switch import KillSwitch
 from . import errors
 
 __version__ = "0.1.0.dev0"
 __all__ = ["Clock", "SystemClock", "FakeClock", "Paths", "Verdict", "StateFile", "WriterIdentity", "Seal",
-           "SignedLedger", "Entry", "VerifyReport", "KINDS", "GENESIS_HASH", "EntryHalt", "HaltRecord",
+           "Ledger", "SignedLedger", "Entry", "Anchor", "VerifyReport", "KINDS", "GENESIS_HASH", "ANCHOR_AFTER", "EntryHalt", "HaltRecord",
            "KillSwitch", "errors"]

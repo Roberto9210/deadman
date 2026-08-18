@@ -16,15 +16,20 @@ class Paths:
         self.ledger_file = self.ledger_dir / "ledger.jsonl"
         self.chain_state = self.ledger_dir / "chain_state.json"
         self.chain_lock = self.ledger_dir / "chain_state.lock"
-        self.keys_dir = self.ledger_dir / "keys"
+        self.anchors_file = self.ledger_dir / "anchors.jsonl"
         try:
             self.root.mkdir(parents=True, exist_ok=True)
             self.ledger_dir.mkdir(parents=True, exist_ok=True)
-            self.keys_dir.mkdir(parents=True, exist_ok=True)
-            probe = self.root / ".deadman_write_probe"
+            # per-process probe name: two processes constructing Paths on the
+            # same root at once must not race on one file (seen in the
+            # two-process ledger test as a spurious PathsNotWritable).
+            probe = self.root / f".deadman_write_probe.{os.getpid()}"
             with open(probe, "w", encoding="utf-8") as f:
                 f.write("ok")
-            os.remove(probe)
+            try:
+                os.remove(probe)
+            except OSError:
+                pass  # writability is proven; a lingering probe is harmless
         except OSError as e:
             raise PathsNotWritable(f"cannot write state under {self.root}: {e}") from e
 

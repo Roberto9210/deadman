@@ -63,7 +63,7 @@ def test_engage_release_idempotent_and_ledgered(paths, ledger):
     assert ks.release("done") is False  # already gone
     assert ks.check().allowed
     kinds = [e["kind"] for e in _lines(paths.ledger_file)]
-    assert kinds == ["KEY_GENERATED", "KILL_ENGAGED", "KILL_ENGAGED", "KILL_RELEASED"] or kinds == ["KILL_ENGAGED", "KILL_ENGAGED", "KILL_RELEASED"]
+    assert kinds == ["KILL_ENGAGED", "KILL_ENGAGED", "KILL_RELEASED"]
 
 
 def test_engage_writes_sentinel_even_if_ledger_fails(paths):

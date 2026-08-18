@@ -4,6 +4,11 @@ Execution-safety primitives for automated trading systems. Broker-agnostic,
 strategy-agnostic. The machine stops when nobody can vouch that everything is
 fine — and an exit is never trapped.
 
+Zero external dependencies (stdlib only) — see the threat model in SPEC §2b:
+the hash chain detects corruption; the guarantee against deliberate rewrite is an
+external ANCHOR (seq, hash) published to a third party the operator does not
+control. Signing is optional and the key is yours.
+
 Specification (the contract this code is written against):
 `../../docs/safety_kit/SPEC.md` (v0.1, closed 2026-08-18).
 
@@ -14,7 +19,7 @@ Specification (the contract this code is written against):
 | `Paths(root)` | §5.1 | done |
 | `Clock` / `SystemClock` / `FakeClock` | §5.6 | done |
 | `StateFile` + writer seal (`ConcurrentWriterDetected`) | §5.2, §5.7 (D) | done |
-| `SignedLedger` (Ed25519, hash chain, OS lock, anchored rotation, `verify`) | §4.5, §5.5 (C) | done |
+| `Ledger` (hash chain, OS lock, anchored rotation, external anchoring via `publisher`, optional `signer/verifier` hooks, `verify`) | §2b, §4.5, §5.5 (C) | done |
 | `EntryHalt` | §4.2, decisions B/D | done |
 | `KillSwitch` (existence only, never parsed) | §4.1, decision A | done |
 | `Intent` / `resolve_units` | §4.3 | pending |

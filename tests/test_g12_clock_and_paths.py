@@ -37,7 +37,7 @@ def test_paths_resolves_once_and_creates_dirs(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     p = Paths("rel_state")
     assert p.root.is_absolute() and p.root == (tmp_path / "rel_state").resolve()
-    assert p.ledger_dir.is_dir() and p.keys_dir.is_dir()
+    assert p.ledger_dir.is_dir() and not (p.ledger_dir / "keys").exists()
     monkeypatch.chdir(tmp_path.parent)  # changing cwd later must not move anything
     assert p.entry_halt == (tmp_path / "rel_state" / "entry_halt.json").resolve()
 

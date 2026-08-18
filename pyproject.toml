@@ -5,11 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deadman"
 version = "0.1.0.dev0"
-description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill, signed ledger."
+description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill, hash-chained + externally anchored ledger. Zero dependencies."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-dependencies = ["pynacl>=1.5"]
+dependencies = []  # zero external dependencies by design (SPEC §2b)
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

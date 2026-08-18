@@ -74,6 +74,65 @@ tamaño" existe para que no vuelva.
 
 ---
 
+## 2b. Modelo de amenaza del ledger — contra qué protege, decidido
+
+**Decisión (2026-08-18): (c) anclaje externo como garantía principal, (a) cadena de hashes como
+mecanismo local; (b) firma queda OPCIONAL vía hook, no en el paquete. Se elimina `pynacl`: cero
+dependencias externas.**
+
+Fundamento, sin adornos:
+
+- **Lo que un ledger local puede probar por sí solo es poco.** Un atacante —o un bug— con acceso al
+  disco puede reescribir cualquier entrada, recomputar los hashes hasta el tip y reemplazar
+  `chain_state.json`; la cadena vuelve a verificar. Una firma Ed25519 con la clave **en el mismo
+  disco** no cambia nada: el atacante firma de nuevo. La firma solo agrega algo si la clave vive
+  fuera del alcance de quien puede tocar el ledger (HSM, keystore del SO, otra máquina). Eso no es
+  el caso de un operador individual con un proceso Python; prometerlo sería exactamente el tipo de
+  garantía plausible que el kit prohíbe.
+- **Lo que sí protege sin depender de la clave es un tercero con fecha.** Si el par `(seq, hash)` del
+  tip se publica periódicamente en un lugar que el operador **no controla** (un remoto git ajeno, un
+  servicio de sellado de tiempo RFC 3161, un canal público con timestamps del servidor), entonces
+  cualquier alteración de la historia anterior al ancla contradice un registro con fecha de un
+  tercero. La garantía es **la fecha del tercero**, no la firma. Es lo que hace que un ledger local
+  sea evidencia de verdad, y es el patrón que el sistema de origen ya tenía a medias (espejo del
+  checkpoint bajo git en `evidence/`).
+- **La cadena de hashes sigue siendo necesaria**: es lo que hace que un ancla de 64 bytes cubra toda
+  la historia previa, y lo que detecta corrupción accidental, escritura a medias o un proceso con
+  bugs sin necesidad de red. Cubre (a) por completo.
+- **Cero dependencias**: `hashlib` + `json` + `os`. Menos superficie que auditar; una razón real
+  para adoptar una librería de seguridad. Quien necesite (b) pasa `signer=`/`verifier=` (dos
+  callables) y guarda su clave donde quiera; el kit no genera claves ni las custodia.
+
+**Qué previene, explícito:**
+| Amenaza | Cadena sola | Cadena + ancla externa |
+|---|---|---|
+| Corrupción accidental, escritura a medias, bug que reescribe una línea | **Detectada** (`HASH_MISMATCH`/`CHAIN_BROKEN`) | Detectada |
+| Borrado o reordenación de entradas | Detectada | Detectada |
+| Rotación que rompe continuidad | Detectada (`ROTATION_LINK_BROKEN`) | Detectada |
+| Reescritura deliberada de historia con acceso al disco (recompute hasta el tip) | **No detectada** | **Detectada para todo lo anterior al último ancla** (`ANCHOR_MISMATCH`) |
+| Reescritura de lo posterior al último ancla | No | No — ventana = intervalo de anclaje; por eso el ancla se fuerza en los eventos que importan |
+| Adulteración del propio registro de anclas local | No | El registro local es una copia; la verdad está en el tercero: `verify(anchors=…)` acepta anclas traídas de fuera |
+| Pérdida total del disco | No | La existencia y la fecha del ancla sobreviven; el contenido no (para eso está el espejo/git del contenido, fuera del kit) |
+
+**Contrato de anclaje (`§4.5` ampliado):**
+- `Anchor = {schema_version, seq, hash, ts_utc, segment, external_ref}`; `external_ref` es lo que
+  devuelve el publicador (sha de commit, id de token TSA, URL) — opaco para el kit.
+- **Qué se publica exactamente**: el JSON canónico del `Anchor` sin `external_ref` (seq, hash, ts_utc,
+  segment). Nada más: sin payloads, sin PII, 64 bytes de hash y un entero.
+- **Cuándo**: (1) en **cada** `LEDGER_ROTATED`; (2) inmediatamente después de **cada** entrada de las
+  clases `KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, UNKNOWN_STATE, CONCURRENT_WRITER_DETECTED`
+  (son las que un operador querría probar que ocurrieron cuando ocurrieron); (3) además cada
+  `anchor_every_n` entradas o `anchor_every_s` segundos, lo que llegue primero (defaults 100 / 3600;
+  el usuario los fija). Si el publicador falla, se anota `ANCHOR_FAILED` y **no** se detiene la
+  ejecución: un ledger sin ancla reciente es evidencia más débil, no un sistema inseguro.
+- **Cómo lo usa `verify(anchors=None)`**: carga `ledger/anchors.jsonl` (o la lista pasada, que
+  puede venir del tercero); para cada ancla localiza `seq` en el segmento que corresponda y exige
+  `hash` idéntico; el reporte lleva `anchors_checked`, `latest_anchor_seq` y `code=ANCHOR_MISMATCH`
+  (`ok=False`) si alguna no coincide. `chain_complete=True` y `latest_anchor_seq=N` juntos
+  significan: "todo hasta N está fechado por un tercero y nada de eso cambió".
+- **El publicador es del usuario** (`Callable[[dict], str]`). Referencias documentadas: `git commit`
+  + `push` a un remoto (3 líneas), TSA RFC 3161. El kit no habla con la red.
+
 ## 3. Por qué existe cada primitiva
 
 Cada pieza responde a un fallo real observado en el sistema de origen. Se citan como patrones.
@@ -86,7 +145,7 @@ Cada pieza responde a un fallo real observado en el sistema de origen. Se citan 
 | **Contrato de unidades** | La cantidad viajaba en un campo `amount` sin decir si eran dólares o unidades de base; el vendedor "de toda la posición" vendía un importe en USD convertido a un precio de otro momento. Ahora `units ∈ {USD, BASE, CONTRACTS}` es obligatorio y su ausencia rechaza ruidoso. |
 | **Post‑fill honesto** | El adapter marcaba éxito al enviar, no al llenar; un timeout se contaba como trade; una excepción al confirmar dejaba una orden viva sin dueño. Ahora: éxito = fill confirmado; sin fill ⇒ cancelar, releer, `NO_FILL_CANCELED` (no es trade); no se puede confirmar ⇒ estado **desconocido** ⇒ freno + registro. |
 | **Reconciliación de órdenes** | Al arrancar, nadie preguntaba al broker qué había quedado abierto. Órdenes que aumentan exposición y nadie recuerda se cancelan; las que la reducen se dejan y se reportan. |
-| **Ledger firmado y encadenado** | Los registros se podían editar, y de hecho una parte de la historia se resumía con datos posteriores. Hash‑chain + firma + escritura atómica: se puede probar qué se decidió, cuándo, y que nadie lo cambió después. |
+| **Ledger encadenado y anclado** | Los registros se podían editar, y de hecho una parte de la historia se resumía con datos posteriores. Hash‑chain + escritura atómica + ancla externa con fecha de un tercero (§2b): se puede probar qué se decidió, cuándo, y que nadie lo cambió después — hasta el último ancla. |
 | **Cordura de orden separada de la eligibilidad** | Un chequeo de frescura del feed leía una clave que **ningún productor escribía**, así que siempre decía NOMINAL: un chequeo que existe no es un chequeo que corre. La cordura del kit solo usa datos que el propio llamador entrega en la llamada; si faltan, deniega. |
 | **Cero defaults plausibles (contrato §2)** | Una clave de política de capital que no existía en el archivo se leía con default 100 ⇒ **el tope de riesgo por operación era $2 fijos** durante meses, con cualquier balance real. Y un RSI que nadie producía valía 50 siempre. Un default plausible es un bug que no falla. |
 | **Límites diarios que cuentan salidas pero no las frenan** | El límite de operaciones diarias bloqueó cierres. Ahora los fills de salida **cuentan** (para que el número sea verdad) pero **no se chequean** contra el tope. |
@@ -171,16 +230,23 @@ class OrderSanity:
               # aplica a entradas Y salidas; cualquier argumento None/NaN => denegado <ARG>_MISSING
               # size_available: para BASE/CONTRACTS en salida = base disponible; para USD en entrada = quote disponible
 
-# ---------- 5. ledger firmado ----------
+# ---------- 5. ledger encadenado + anclado (§2b) ----------
 @dataclass(frozen=True)
-class Entry: seq: int; ts_utc: str; kind: str; actor: str; payload: Mapping; prev_hash: str; hash: str; sig: str; schema_version: int
-class SignedLedger:
-    def __init__(self, paths: Paths, clock: Clock, signing_key: bytes | None = None,
-                 on_append: Callable[[Entry], None] | None = None)     # hook (p.ej. anchor externo); NO parte del kit
+class Entry: seq: int; ts_utc: str; kind: str; actor: str; payload: Mapping; prev_hash: str; hash: str; schema_version: int; sig: str | None = None
+@dataclass(frozen=True)
+class Anchor: schema_version: int; seq: int; hash: str; ts_utc: str; segment: str; external_ref: str
+class Ledger:
+    def __init__(self, paths: Paths, clock: Clock,
+                 publisher: Callable[[dict], str] | None = None,     # publica el ancla fuera; devuelve external_ref
+                 anchor_every_n: int = 100, anchor_every_s: float = 3600.0,
+                 signer: Callable[[bytes], bytes] | None = None,     # OPCIONAL (b): firma el hash; la clave es del usuario
+                 verifier: Callable[[bytes, bytes], bool] | None = None,
+                 on_append: Callable[[Entry], None] | None = None)
     def append(self, kind: str, payload: Mapping, actor: str = "user") -> Entry   # falla ruidoso (LedgerWriteError); el llamador decide halt
     def last_hash(self) -> str
-    def verify(self, from_seq: int | None = None) -> VerifyReport                # ver §5.5 rotación
-    def public_key(self) -> bytes
+    def rotate(self, actor: str = "user") -> Entry                                # ver §5.5
+    def anchor(self, reason: str = "manual") -> Anchor | None                     # publica el tip ahora; None si no hay publisher
+    def verify(self, from_seq: int | None = None, anchors: list[Anchor] | None = None) -> VerifyReport
 
 # ---------- 6. broker y ejecutor ----------
 @dataclass(frozen=True)
@@ -256,7 +322,8 @@ puede (permisos), levanta en construcción — el sistema no arranca sin poder e
 | `daily_stats.json` | `{schema_version, day_utc: "YYYY-MM-DD", trades: int, filled_usd: float, realized_pnl_usd: float, updated_ts_utc, writer_pid, writer_started_at, write_seq}` | Al leer, si `day_utc != clock.today_utc()` ⇒ se reinicia en memoria y se persiste. Ilegible ⇒ **Decisión B (2026-08-18): fail‑closed SOLO para entradas**: `check()` deniega toda entrada con `DAILY_STATS_UNREADABLE` y lo anota en el ledger; **una salida pasa igual** (`is_exit` ⇒ `EXIT_BYPASSES_DAILY_LIMITS` se evalúa ANTES de leer el archivo, así que un archivo corrupto no puede atrapar una posición). No se reinicia solo: lo repara un humano (borrar el archivo ⇒ nuevo día limpio) y queda `DAILY_STATS_RESET` en el ledger. |
 | `ledger/chain_state.json` | `{schema_version, last_seq: int, last_hash: str}` | Solo el tip. Reemplazo atómico. Ver 5.5. |
 | `ledger/ledger.jsonl` | una `Entry` por línea | Append‑only. |
-| `ledger/keys/` | clave privada Ed25519 (permisos 0600) + pública | Si no existe al construir `SignedLedger` sin `signing_key`, se genera y se anota `KEY_GENERATED`. |
+| `ledger/anchors.jsonl` | un `Anchor` por línea | Copia local de lo publicado; la verdad está en el tercero (`verify(anchors=…)` acepta la lista externa). |
+| (no hay `keys/`) | — | El kit no genera ni custodia claves (§2b). Quien firme, pasa `signer`/`verifier`. |
 
 ### 5.3 "Estado desconocido" de una orden — definición exacta
 Una orden está en **estado desconocido** cuando el kit **tiene o pudo tener un `order_id` aceptado por el
@@ -282,7 +349,7 @@ conforme si pasa las pruebas de §6 con estas garantías. (El primer adaptador p
 `FakeExchange`/`FakeRouter` de los tests actuales son la referencia de forma.)
 
 ### 5.5 Catálogo de `kind` del ledger y rotación
-Kinds mínimos: `KEY_GENERATED, KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, INTENT_DENIED, ORDER_SENT,
+Kinds mínimos: `ANCHOR_PUBLISHED, ANCHOR_FAILED, KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, INTENT_DENIED, ORDER_SENT,
 FILL, PARTIAL_FILL, NO_FILL_CANCELED, UNKNOWN_STATE, RECONCILE_REPORT, DAILY_STATS_RESET, LEDGER_ROTATED,
 CONCURRENT_WRITER_DETECTED, USER_NOTE`. Payload mínimo por kind se fija en el test correspondiente. Todo `payload` lleva `client_id` si
 existe.
@@ -362,11 +429,11 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 | **G8 Snapshot de cuenta** (fix3, ~8) | cleanup fix3 | un dato de cuenta con edad > máx o status ≠ sincronizado se trata como **ausente** (denegar entrada con `ACCOUNT_SNAPSHOT_STALE`), nunca como el último valor bueno; salidas no dependen de él. |
 | **G9 Todo en llamas** (13) | exit_tanda fire | con halt + límites agotados + stats corruptas + kill switch **apagado**, una salida pasa; con kill switch encendido, no; con spread fuera de rango, tampoco. Es el test de la asimetría completa. |
 | **G10 Cero defaults** (nuevo, ~10) | — | por cada dato de entrada del ejecutor, el caso ausente ⇒ `DENIED/<DATO>_MISSING`; **equity/balance ausente nunca produce un tamaño** (el contraejemplo de §2 como test). |
-| **G11 Ledger** (nuevo, ~14) | — | append encadena y firma; `verify()` detecta una línea alterada, borrada o reordenada; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
+| **G11 Ledger** (nuevo, ~18) | — | append encadena; `verify()` detecta una línea alterada, borrada o reordenada; **reescritura completa con recompute hasta el tip pasa la cadena pero cae por `ANCHOR_MISMATCH` cuando hay un ancla anterior; anclaje forzado tras `HALT_SET`/`KILL_ENGAGED`/`UNKNOWN_STATE`; publisher que falla ⇒ `ANCHOR_FAILED` y la ejecución sigue; `signer/verifier` opcionales funcionan con cualquier par de callables**; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
 | **G13 Escritor concurrente** (nuevo, ~8) | — | dos escritores simulados sobre `entry_halt.json`/`daily_stats.json`: el segundo detecta el sello cambiado ⇒ no escribe, `ConcurrentWriterDetected`, halt `CONCURRENT_WRITER_DETECTED` manual y ledger; conflicto sobre el propio `entry_halt.json` ⇒ el halt se escribe forzado; al arrancar con `writer_pid` ajeno vivo ⇒ detectado; con pid muerto ⇒ se toma la escritura y se anota. |
 | **G12 Reloj** (nuevo, ~4) | — | ningún módulo llama a `datetime.now/time.time` (test estático); rollover y timeout dependen solo del reloj inyectado. |
 
-Total estimado: **~145 aserciones**, de las cuales ~97 son las que ya existen reescritas y ~48 nuevas (kill
+Total estimado: **~150 aserciones**, de las cuales ~97 son las que ya existen reescritas y ~48 nuevas (kill
 switch, ledger y rotación, cero defaults, reloj, escritor concurrente) que hoy no tienen prueba propia. Lo que **no** viaja: risk‑exit por ATR,
 TTL de posición, capital operativo, política de señal única, SPX, EMA, código muerto — es del sistema de origen.
 
