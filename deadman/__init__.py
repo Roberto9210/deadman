@@ -8,9 +8,11 @@ from .statefile import StateFile, WriterIdentity, Seal
 from .ledger import Ledger, SignedLedger, Entry, Anchor, VerifyReport, KINDS, GENESIS_HASH, ANCHOR_AFTER
 from .entry_halt import EntryHalt, HaltRecord
 from .kill_switch import KillSwitch
+from .intent import Intent, Resolved, resolve_units, PositionSnapshot, ExposurePredicate, spot_long_only_is_exit, net_position_is_exit
 from . import errors
 
 __version__ = "0.1.0.dev0"
 __all__ = ["Clock", "SystemClock", "FakeClock", "Paths", "Verdict", "StateFile", "WriterIdentity", "Seal",
            "Ledger", "SignedLedger", "Entry", "Anchor", "VerifyReport", "KINDS", "GENESIS_HASH", "ANCHOR_AFTER", "EntryHalt", "HaltRecord",
-           "KillSwitch", "errors"]
+           "KillSwitch", "Intent", "Resolved", "resolve_units", "PositionSnapshot", "ExposurePredicate",
+           "spot_long_only_is_exit", "net_position_is_exit", "errors"]

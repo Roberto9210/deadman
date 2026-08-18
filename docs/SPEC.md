@@ -130,8 +130,25 @@ Fundamento, sin adornos:
   `hash` idéntico; el reporte lleva `anchors_checked`, `latest_anchor_seq` y `code=ANCHOR_MISMATCH`
   (`ok=False`) si alguna no coincide. `chain_complete=True` y `latest_anchor_seq=N` juntos
   significan: "todo hasta N está fechado por un tercero y nada de eso cambió".
-- **El publicador es del usuario** (`Callable[[dict], str]`). Referencias documentadas: `git commit`
-  + `push` a un remoto (3 líneas), TSA RFC 3161. El kit no habla con la red.
+- **El publicador es del usuario** (`Callable[[dict], str]`). El kit no habla con la red.
+- **Qué cuenta como tercero — la trampa más probable al implementar el publicador:** un remoto git donde
+  el operador (o cualquiera con su credencial) puede hacer `force-push` **NO es un tercero
+  independiente**: puede reescribir la historia y la garantía se evapora sin aviso. Un repo propio en
+  GitHub con la rama por defecto sin protección es exactamente eso. **Sí califican**: (1) una rama
+  **protegida** con force‑push y borrado prohibidos **también para el owner/admin** (y, si el proveedor
+  lo permite, con el commit firmado y el reflog retenido); (2) una **autoridad de sellado de tiempo
+  RFC 3161** (el token lleva la fecha del TSA sobre el hash); (3) un **servicio append‑only de
+  terceros** con timestamps del servidor que el operador no administra. La calidad de la evidencia es la
+  del eslabón más débil: el ancla vale lo que valga la inmutabilidad del sitio donde se publicó.
+- **`ANCHOR_FAILED` sostenido no es aceptable en silencio.** Cada fallo se anota; y cuando se alcanza
+  **`stale_after_failures` fallos consecutivos (default 3) o `stale_after_s` segundos sin un ancla
+  exitosa (default 4·`anchor_every_s`)**, el ledger escribe una entrada propia **`ANCHOR_STALE`** con
+  `{consecutive_failures, seconds_since_last_ok, last_ok_seq, last_error}` y crea un **marcador visible**
+  `root/anchor_stale.flag` (texto legible, mtime = cuándo). No es un halt de ejecución —la operación
+  no se vuelve insegura por falta de ancla— pero es imposible de ignorar: aparece en el ledger, en el
+  disco y en el log a nivel CRITICAL, y `verify()` lo reporta en `detail` mientras el marcador exista.
+  El primer ancla exitosa posterior borra el marcador y anota `ANCHOR_RECOVERED`. Detectar sin actuar
+  no está permitido en código nuevo.
 
 ## 3. Por qué existe cada primitiva
 
@@ -239,6 +256,7 @@ class Ledger:
     def __init__(self, paths: Paths, clock: Clock,
                  publisher: Callable[[dict], str] | None = None,     # publica el ancla fuera; devuelve external_ref
                  anchor_every_n: int = 100, anchor_every_s: float = 3600.0,
+                 stale_after_failures: int = 3, stale_after_s: float | None = None,   # None => 4*anchor_every_s
                  signer: Callable[[bytes], bytes] | None = None,     # OPCIONAL (b): firma el hash; la clave es del usuario
                  verifier: Callable[[bytes, bytes], bool] | None = None,
                  on_append: Callable[[Entry], None] | None = None)
@@ -323,6 +341,7 @@ puede (permisos), levanta en construcción — el sistema no arranca sin poder e
 | `ledger/chain_state.json` | `{schema_version, last_seq: int, last_hash: str}` | Solo el tip. Reemplazo atómico. Ver 5.5. |
 | `ledger/ledger.jsonl` | una `Entry` por línea | Append‑only. |
 | `ledger/anchors.jsonl` | un `Anchor` por línea | Copia local de lo publicado; la verdad está en el tercero (`verify(anchors=…)` acepta la lista externa). |
+| `anchor_stale.flag` | texto libre para humanos | Marcador visible de anclaje caído (§2b). Existe ⇔ hay `ANCHOR_STALE` sin `ANCHOR_RECOVERED` posterior. |
 | (no hay `keys/`) | — | El kit no genera ni custodia claves (§2b). Quien firme, pasa `signer`/`verifier`. |
 
 ### 5.3 "Estado desconocido" de una orden — definición exacta
@@ -349,7 +368,7 @@ conforme si pasa las pruebas de §6 con estas garantías. (El primer adaptador p
 `FakeExchange`/`FakeRouter` de los tests actuales son la referencia de forma.)
 
 ### 5.5 Catálogo de `kind` del ledger y rotación
-Kinds mínimos: `ANCHOR_PUBLISHED, ANCHOR_FAILED, KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, INTENT_DENIED, ORDER_SENT,
+Kinds mínimos: `ANCHOR_PUBLISHED, ANCHOR_FAILED, ANCHOR_STALE, ANCHOR_RECOVERED, KILL_ENGAGED, KILL_RELEASED, HALT_SET, HALT_CLEARED, INTENT_DENIED, ORDER_SENT,
 FILL, PARTIAL_FILL, NO_FILL_CANCELED, UNKNOWN_STATE, RECONCILE_REPORT, DAILY_STATS_RESET, LEDGER_ROTATED,
 CONCURRENT_WRITER_DETECTED, USER_NOTE`. Payload mínimo por kind se fija en el test correspondiente. Todo `payload` lleva `client_id` si
 existe.
@@ -429,7 +448,7 @@ comprobaciones de datos, el caso "ausente ⇒ denegado con código".
 | **G8 Snapshot de cuenta** (fix3, ~8) | cleanup fix3 | un dato de cuenta con edad > máx o status ≠ sincronizado se trata como **ausente** (denegar entrada con `ACCOUNT_SNAPSHOT_STALE`), nunca como el último valor bueno; salidas no dependen de él. |
 | **G9 Todo en llamas** (13) | exit_tanda fire | con halt + límites agotados + stats corruptas + kill switch **apagado**, una salida pasa; con kill switch encendido, no; con spread fuera de rango, tampoco. Es el test de la asimetría completa. |
 | **G10 Cero defaults** (nuevo, ~10) | — | por cada dato de entrada del ejecutor, el caso ausente ⇒ `DENIED/<DATO>_MISSING`; **equity/balance ausente nunca produce un tamaño** (el contraejemplo de §2 como test). |
-| **G11 Ledger** (nuevo, ~18) | — | append encadena; `verify()` detecta una línea alterada, borrada o reordenada; **reescritura completa con recompute hasta el tip pasa la cadena pero cae por `ANCHOR_MISMATCH` cuando hay un ancla anterior; anclaje forzado tras `HALT_SET`/`KILL_ENGAGED`/`UNKNOWN_STATE`; publisher que falla ⇒ `ANCHOR_FAILED` y la ejecución sigue; `signer/verifier` opcionales funcionan con cualquier par de callables**; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
+| **G11 Ledger** (nuevo, ~18) | — | append encadena; `verify()` detecta una línea alterada, borrada o reordenada; **reescritura completa con recompute hasta el tip pasa la cadena pero cae por `ANCHOR_MISMATCH` cuando hay un ancla anterior; anclaje forzado tras `HALT_SET`/`KILL_ENGAGED`/`UNKNOWN_STATE`; publisher que falla ⇒ `ANCHOR_FAILED` y la ejecución sigue; **fallos sostenidos ⇒ `ANCHOR_STALE` + `anchor_stale.flag`, y el primer éxito posterior ⇒ `ANCHOR_RECOVERED` + marcador borrado**; `signer/verifier` opcionales funcionan con cualquier par de callables**; escritura concurrente desde dos procesos no rompe la cadena; **rotación: `LEDGER_ROTATED` con `prev_last_hash == prev_hash`, `verify()` cruza al segmento anterior y prueba continuidad; segmento anterior alterado ⇒ `ROTATION_LINK_BROKEN`; segmento ausente ⇒ `chain_complete=False`, nunca OK a secas**. |
 | **G13 Escritor concurrente** (nuevo, ~8) | — | dos escritores simulados sobre `entry_halt.json`/`daily_stats.json`: el segundo detecta el sello cambiado ⇒ no escribe, `ConcurrentWriterDetected`, halt `CONCURRENT_WRITER_DETECTED` manual y ledger; conflicto sobre el propio `entry_halt.json` ⇒ el halt se escribe forzado; al arrancar con `writer_pid` ajeno vivo ⇒ detectado; con pid muerto ⇒ se toma la escritura y se anota. |
 | **G12 Reloj** (nuevo, ~4) | — | ningún módulo llama a `datetime.now/time.time` (test estático); rollover y timeout dependen solo del reloj inyectado. |
 

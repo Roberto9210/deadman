@@ -23,6 +23,7 @@ Files under Paths.ledger_dir:
 """
 import hashlib
 import json
+import logging
 import os
 import sys
 import threading
@@ -43,7 +44,7 @@ else:
 SCHEMA_VERSION = 1
 GENESIS_HASH = "0" * 64
 KINDS = frozenset({
-    "ANCHOR_PUBLISHED", "ANCHOR_FAILED", "KILL_ENGAGED", "KILL_RELEASED", "HALT_SET", "HALT_CLEARED",
+    "ANCHOR_PUBLISHED", "ANCHOR_FAILED", "ANCHOR_STALE", "ANCHOR_RECOVERED", "KILL_ENGAGED", "KILL_RELEASED", "HALT_SET", "HALT_CLEARED",
     "INTENT_DENIED", "ORDER_SENT", "FILL", "PARTIAL_FILL", "NO_FILL_CANCELED", "UNKNOWN_STATE",
     "RECONCILE_REPORT", "DAILY_STATS_RESET", "LEDGER_ROTATED", "CONCURRENT_WRITER_DETECTED", "USER_NOTE",
 })
@@ -121,6 +122,7 @@ class Ledger:
     def __init__(self, paths: Paths, clock: Clock,
                  publisher: Callable[[dict], str] | None = None,
                  anchor_every_n: int = 100, anchor_every_s: float = 3600.0,
+                 stale_after_failures: int = 3, stale_after_s: float | None = None,
                  signer: Callable[[bytes], bytes] | None = None,
                  verifier: Callable[[bytes, bytes], bool] | None = None,
                  on_append: Callable[[Entry], None] | None = None,
@@ -136,8 +138,13 @@ class Ledger:
         self.allow_unknown_kinds = allow_unknown_kinds
         self.lock_timeout_s = lock_timeout_s
         self._thread_lock = threading.RLock()
+        self.stale_after_failures = int(stale_after_failures)
+        self.stale_after_s = float(stale_after_s) if stale_after_s is not None else 4.0 * self.anchor_every_s
         self._entries_since_anchor = 0
         self._last_anchor_mono: Optional[float] = None
+        self._last_ok_seq: Optional[int] = None
+        self._consecutive_failures = 0
+        self._stale_flagged = self.paths.anchor_stale_flag.exists()
         self.paths.chain_lock.touch(exist_ok=True)
 
     # ---------- locking ----------
@@ -274,7 +281,7 @@ class Ledger:
     def _maybe_anchor(self, entry: Entry) -> None:
         if self.publisher is None:
             return
-        if entry.kind in ("ANCHOR_PUBLISHED", "ANCHOR_FAILED"):
+        if entry.kind in ("ANCHOR_PUBLISHED", "ANCHOR_FAILED", "ANCHOR_STALE", "ANCHOR_RECOVERED"):
             return
         due = entry.kind in ANCHOR_AFTER or self._entries_since_anchor >= self.anchor_every_n
         if not due and self._last_anchor_mono is not None:
@@ -298,8 +305,12 @@ class Ledger:
         try:
             ref = str(self.publisher(draft.published_form()))
         except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            self._consecutive_failures += 1
             self._locked(lambda: self._append_unlocked("ANCHOR_FAILED", {"seq": draft.seq, "hash": draft.hash,
-                                                                          "reason": reason, "error": f"{type(e).__name__}: {e}"}, "deadman.ledger"))
+                                                                          "reason": reason, "error": err,
+                                                                          "consecutive_failures": self._consecutive_failures}, "deadman.ledger"))
+            self._check_stale(err)
             return None
         anc = Anchor(draft.schema_version, draft.seq, draft.hash, draft.ts_utc, draft.segment, ref)
         with open(self.paths.anchors_file, "a", encoding="utf-8") as f:
@@ -308,8 +319,36 @@ class Ledger:
             os.fsync(f.fileno())
         self._entries_since_anchor = 0
         self._last_anchor_mono = self.clock.monotonic()
+        self._last_ok_seq = anc.seq
+        self._consecutive_failures = 0
         self._locked(lambda: self._append_unlocked("ANCHOR_PUBLISHED", {**asdict(anc), "reason": reason}, "deadman.ledger"))
+        if self._stale_flagged:
+            self._stale_flagged = False
+            try:
+                os.remove(self.paths.anchor_stale_flag)
+            except OSError:
+                pass
+            self._locked(lambda: self._append_unlocked("ANCHOR_RECOVERED", {"seq": anc.seq, "external_ref": ref}, "deadman.ledger"))
         return anc
+
+    def _check_stale(self, last_error: str) -> None:
+        """SPEC §2b: sustained anchor failure is not acceptable in silence.
+        Not an execution halt - a ledger entry of its own plus a visible flag."""
+        since_ok = None if self._last_anchor_mono is None else (self.clock.monotonic() - self._last_anchor_mono)
+        stale = (self._consecutive_failures >= self.stale_after_failures
+                 or (since_ok is not None and since_ok >= self.stale_after_s))
+        if not stale or self._stale_flagged:
+            return
+        self._stale_flagged = True
+        payload = {"consecutive_failures": self._consecutive_failures, "seconds_since_last_ok": since_ok,
+                   "last_ok_seq": self._last_ok_seq, "last_error": last_error}
+        try:
+            with open(self.paths.anchor_stale_flag, "w", encoding="utf-8") as f:
+                f.write(f"ANCHOR_STALE {iso(self.clock.now_utc())} {json.dumps(payload)}\n")
+        except OSError:
+            pass
+        self._locked(lambda: self._append_unlocked("ANCHOR_STALE", payload, "deadman.ledger"))
+        logging.getLogger("deadman.ledger").critical("[LEDGER] ANCHOR_STALE: %s", payload)
 
     def local_anchors(self) -> list[Anchor]:
         p = self.paths.anchors_file
@@ -456,6 +495,8 @@ class Ledger:
                                     anchors_checked, latest, f"anchor seq {a.seq} hash {a.hash[:12]} != ledger {got[:12]}")
             latest = max(latest or 0, int(a.seq))
         detail = "" if code == "OK" else f"{seg_path.name} missing; verified from seq {verified_from} only"
+        if self.paths.anchor_stale_flag.exists():
+            detail = (detail + "; " if detail else "") + "ANCHOR_STALE flag present: anchoring has been failing"
         return VerifyReport(True, code, chain_complete, verified_from, checked, segments, anchors_checked, latest, detail)
 
 

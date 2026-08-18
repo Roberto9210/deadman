@@ -11,6 +11,7 @@ class Paths:
         self.root = Path(root).resolve()
         self.kill_sentinel = self.root / "kill_switch.enabled"
         self.entry_halt = self.root / "entry_halt.json"
+        self.anchor_stale_flag = self.root / "anchor_stale.flag"
         self.daily_stats = self.root / "daily_stats.json"
         self.ledger_dir = self.root / "ledger"
         self.ledger_file = self.ledger_dir / "ledger.jsonl"

@@ -292,3 +292,52 @@ def test_two_processes_appending_do_not_fork_the_chain(paths, clock, tmp_path):
     assert [r["seq"] for r in rows] == list(range(1, 2 * n + 2))
     rep = Ledger(paths, clock).verify()
     assert rep.ok and rep.chain_complete and rep.entries_checked == 2 * n + 1
+
+
+# ---------- sustained anchor failure is not silent (SPEC §2b) ----------
+
+def test_sustained_anchor_failure_raises_stale_flag_and_recovers(paths, clock):
+    state = {"fail": True, "n": 0}
+
+    def pub(d):
+        state["n"] += 1
+        if state["fail"]:
+            raise ConnectionError("remote down")
+        return f"ref-{state['n']}"
+    lg = Ledger(paths, clock, publisher=pub, anchor_every_n=1, stale_after_failures=3, stale_after_s=10**9)
+    lg.append("USER_NOTE", {"i": 1})   # fail 1
+    lg.append("USER_NOTE", {"i": 2})   # fail 2
+    assert not paths.anchor_stale_flag.exists()
+    lg.append("USER_NOTE", {"i": 3})   # fail 3 -> stale
+    assert paths.anchor_stale_flag.exists()
+    kinds = [r["kind"] for r in _lines(paths.ledger_file)]
+    assert kinds.count("ANCHOR_STALE") == 1
+    lg.append("USER_NOTE", {"i": 4})   # fail 4 -> still stale, no second STALE entry
+    assert [r["kind"] for r in _lines(paths.ledger_file)].count("ANCHOR_STALE") == 1
+    assert "ANCHOR_STALE" in lg.verify().detail
+    state["fail"] = False
+    lg.append("USER_NOTE", {"i": 5})   # success -> recovered
+    assert not paths.anchor_stale_flag.exists()
+    kinds = [r["kind"] for r in _lines(paths.ledger_file)]
+    assert "ANCHOR_RECOVERED" in kinds and kinds.index("ANCHOR_RECOVERED") > kinds.index("ANCHOR_STALE")
+    assert "ANCHOR_STALE" not in lg.verify().detail
+
+
+def test_stale_by_elapsed_time_without_success(paths, clock):
+    calls = {"n": 0}
+
+    def pub(d):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "ok-1"
+        raise ConnectionError("down")
+    lg = Ledger(paths, clock, publisher=pub, anchor_every_n=1, stale_after_failures=10**6, stale_after_s=100)
+    lg.append("USER_NOTE", {})          # ok
+    clock.advance(seconds=50)
+    lg.append("USER_NOTE", {})          # fail, 50s since ok -> not stale
+    assert not paths.anchor_stale_flag.exists()
+    clock.advance(seconds=60)
+    lg.append("USER_NOTE", {})          # fail, 110s since ok -> stale
+    assert paths.anchor_stale_flag.exists()
+    flag = paths.anchor_stale_flag.read_text(encoding="utf-8")
+    assert flag.startswith("ANCHOR_STALE") and "seconds_since_last_ok" in flag
