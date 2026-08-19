@@ -1,5 +1,7 @@
 # deadman
 
+[![CI](https://github.com/Roberto9210/deadman/actions/workflows/deadman.yml/badge.svg?branch=main)](https://github.com/Roberto9210/deadman/actions/workflows/deadman.yml) [![PyPI](https://img.shields.io/pypi/v/deadman-kit.svg)](https://pypi.org/project/deadman-kit/) [![Python](https://img.shields.io/pypi/pyversions/deadman-kit.svg)](https://pypi.org/project/deadman-kit/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > Installs as **`deadman-kit`** (`pip install deadman-kit`), imports as **`deadman`** — the PyPI name `deadman` was taken.
 
 **deadman sits between your strategy and your broker, and when it meets the unknown it stops instead of guessing.**
