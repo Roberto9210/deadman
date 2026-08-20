@@ -1,0 +1,4 @@
+# everything demo.py generates: candles, per-scenario configs, deadman state,
+# freqtrade logs. Reproducible from the code in this directory.
+demo_out/
+user_data/
