@@ -159,7 +159,7 @@ placement, polling, timeout, cancel and startup reconciliation), and the gate ne
 adjustments, liquidations, partial exits or stoploss-on-exchange orders — their fills are ledgered,
 not gated. Shorts and futures are refused rather than guessed.
 
-**[`examples/freqtrade/`](examples/freqtrade/)** has the whole thing: the wrapper, a demo strategy, 26
+**[`examples/freqtrade/`](examples/freqtrade/)** has the whole thing: the wrapper, a demo strategy, 28
 tests that need neither freqtrade nor an exchange, and `demo.py` — three real `freqtrade backtesting`
 runs proving the sentinel stops entries, the daily limit blocks, the ledger records and `verify()`
 passes, plus a fourth check where an edited ledger is rejected with `HASH_MISMATCH`. Every claim there

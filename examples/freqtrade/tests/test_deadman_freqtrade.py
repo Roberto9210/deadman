@@ -10,6 +10,7 @@ prove that - only a run can.
 """
 import json
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -136,6 +137,45 @@ def test_declared_spread_requires_both_numbers():
     q = DeclaredSpreadQuotes(spread_bps=4.0, latency_ms=25.0)(PAIR, 100.0)
     assert q.source == "declared_spread_simulation"   # it says so in every ledger entry
     assert q.bid < 100.0 < q.ask
+
+
+class FakeTickerDp:
+    """dp.ticker() returning what a venue actually returns. Kraken via ccxt
+    sends no `timestamp` - observed on a real BTC/USDT ticker."""
+
+    def __init__(self, ticker):
+        self._t = ticker
+
+    def ticker(self, pair):
+        return self._t
+
+
+def test_a_ticker_age_policy_the_venue_cannot_support_denies(tmp_path):
+    """A check that exists is not a check that runs. If an age policy is
+    configured and the venue sends no timestamp, the quote is refused instead
+    of being quietly treated as fresh."""
+    from deadman_freqtrade import TickerQuotes
+
+    no_ts = FakeTickerDp({"bid": 100.0, "ask": 100.1, "timestamp": None})
+    assert TickerQuotes(no_ts).__call__(PAIR, 0.0).bid == 100.0          # no policy: usable
+    q = TickerQuotes(no_ts, max_ticker_age_s=30.0)(PAIR, 0.0)            # policy: refused
+    assert q.bid is None and q.source.startswith("ticker_age_unknown")
+
+    fresh = FakeTickerDp({"bid": 100.0, "ask": 100.1, "timestamp": time.time() * 1000})
+    assert TickerQuotes(fresh, max_ticker_age_s=30.0)(PAIR, 0.0).bid == 100.0
+    stale = FakeTickerDp({"bid": 100.0, "ask": 100.1, "timestamp": (time.time() - 600) * 1000})
+    assert TickerQuotes(stale, max_ticker_age_s=30.0)(PAIR, 0.0).source.startswith("ticker_stale")
+
+
+def test_an_empty_or_broken_ticker_denies(tmp_path):
+    from deadman_freqtrade import TickerQuotes
+
+    class Boom:
+        def ticker(self, pair):
+            raise RuntimeError("exchange down")
+
+    assert TickerQuotes(FakeTickerDp({}))(PAIR, 0.0).source == "ticker_empty"
+    assert TickerQuotes(Boom())(PAIR, 0.0).source.startswith("ticker_failed")
 
 
 # --------------------------------------------------------------------------

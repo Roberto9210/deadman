@@ -12,7 +12,7 @@ and the demo is a real `freqtrade backtesting` run, not a mock.
 ```bash
 pip install deadman-kit freqtrade
 python examples/freqtrade/demo.py          # three runs, 18 checks, exit code 0 if all pass
-python -m pytest -q examples/freqtrade/tests
+python -m pytest -q examples/freqtrade/tests   # 28 cases
 ```
 
 ## What the demo shows
@@ -151,7 +151,13 @@ you none of them. There is no default, because a default here means inventing a 
 
 - `TickerQuotes(self.dp)` — live and dry-run. `dp.ticker()` is a real network call
   (`data/dataprovider.py:565-577`), so the time it takes *is* the latency; it is measured, not assumed.
-  An empty or failing ticker yields `None`s, and the entry is denied.
+  An empty or failing ticker yields `None`s, and the entry is denied. Checked against a live Kraken
+  ticker: `bid=72617.7 ask=72620.8 latency_ms=418.2 spread=0.43bps`, entry allowed end to end.
+  Its optional `max_ticker_age_s` has a caveat worth knowing, because it bit this file first: **Kraken
+  via ccxt sends no ticker `timestamp`**, so the age cannot be computed there at all. Configuring a
+  max age against such a venue used to pass silently — a check that exists and never runs, which is
+  the failure this kit is about. It now **denies** instead, with
+  `quote_source: ticker_age_unknown:venue_sends_no_timestamp:…` in the ledger.
 - `DeclaredSpreadQuotes(spread_bps=…, latency_ms=…)` — a **declared simulation** for backtests. Both
   numbers are required arguments, and every ledger entry it feeds carries
   `quote_source: "declared_spread_simulation"` so a run gated by invented quotes can never be read as a
@@ -200,7 +206,7 @@ Two things to know before you copy the numbers:
 | `config.demo.json` | dry-run config, no API keys, `kraken`, `BTC/USDT`, 5m |
 | `make_demo_data.py` | deterministic candles written through freqtrade's own data handler |
 | `demo.py` | the three runs plus the tamper check, each claim asserted |
-| `tests/` | 26 tests that need neither freqtrade nor an exchange |
+| `tests/` | 28 tests that need neither freqtrade nor an exchange |
 
 ## Running it against a live dry-run
 

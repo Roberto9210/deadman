@@ -194,14 +194,22 @@ class TickerQuotes:
         bid, ask = t.get("bid"), t.get("ask")
         if bid is None or ask is None:
             return Quotes(None, None, ms, None, "ticker_empty")
-        # ccxt reports the ticker's own timestamp only on venues that send one;
-        # when it is absent the age is unknown and this says so rather than
-        # calling a stale ticker fresh.
+        # Freshness. ccxt reports the ticker's own timestamp only on venues
+        # that send one - Kraken does not (observed: `timestamp` is None on a
+        # real BTC/USDT ticker). So a max age configured against such a venue
+        # is a check that exists and never runs, which is the failure this kit
+        # is about. If the caller asked for an age policy and the age cannot be
+        # established, the quote is refused: for an ENTRY that is fail-closed,
+        # and exits do not consult order sanity unless you opted in.
         age_s: Optional[float] = None
         ts = t.get("timestamp")
         if ts is not None:
             age_s = max(0.0, time.time() - float(ts) / 1000.0)
-            if self.max_ticker_age_s is not None and age_s > self.max_ticker_age_s:
+        if self.max_ticker_age_s is not None:
+            if age_s is None:
+                return Quotes(None, None, ms, None,
+                              f"ticker_age_unknown:venue_sends_no_timestamp:policy_max_{self.max_ticker_age_s}s")
+            if age_s > self.max_ticker_age_s:
                 return Quotes(None, None, ms, None, f"ticker_stale:{age_s:.1f}s")
         src = "exchange_ticker" if age_s is not None else "exchange_ticker:age_unknown"
         return Quotes(float(bid), float(ask), ms, "connected", src)
