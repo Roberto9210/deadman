@@ -512,6 +512,7 @@ class DeadmanGuardMixin:
         StrategyError and the bot does not start (interface.py:217 ->
         strategy_wrapper with default_retval=None). A bot that cannot build
         its safety state must not trade."""
+        self._deadman_refuse_unsupported_modes()
         self.deadman = self.deadman_build_gate()
         # DeadmanGate builds a FreqtradeClock unless the caller passed another
         # one; only a FreqtradeClock can be driven by freqtrade's current_time.
@@ -520,6 +521,27 @@ class DeadmanGuardMixin:
             log.warning("[deadman] the gate uses %s, not a FreqtradeClock: daily rollover will follow "
                         "that clock and not freqtrade's time", type(self.deadman.clock).__name__)
         log.info("[deadman] gate ready at %s", self.deadman.paths.root)
+
+    def _deadman_refuse_unsupported_modes(self) -> None:
+        """Spot long-only, checked at startup rather than per order.
+
+        The shipped exit predicate is `spot_long_only_is_exit`: it reads any
+        sell as a reduction. On futures an `amount` may be contracts rather
+        than base and a long's exit is still a sell, so the gate would keep
+        answering plausibly while measuring the wrong thing - which is worse
+        than refusing. Refusing in bot_start means the bot does not start
+        (interface.py:217 turns this into a StrategyError).
+        """
+        mode = str((getattr(self, "config", None) or {}).get("trading_mode", "spot"))
+        if mode != "spot":
+            raise ValueError(
+                f"DEADMAN_TRADING_MODE_UNSUPPORTED: trading_mode={mode!r}. This example ships the "
+                f"spot long-only exit predicate; pass a net-position predicate and a gate that "
+                f"resolves CONTRACTS before using it on {mode}."
+            )
+        if getattr(self, "can_short", False):
+            raise ValueError("DEADMAN_SHORTS_UNSUPPORTED: can_short=True with the spot long-only "
+                             "exit predicate; a short's exit is a buy and would look like an entry.")
 
     def _deadman_tick(self, current_time: Optional[datetime]) -> None:
         if self.deadman_clock is not None:

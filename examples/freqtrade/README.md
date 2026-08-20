@@ -100,8 +100,10 @@ All four still reach `order_filled`, so their fills are ledgered and counted —
 *gated*. If you run DCA or partial exits, say so out loud in your own README: this one cannot.
 
 Also out of scope here: shorts and futures. The shipped exit predicate is `spot_long_only_is_exit`, so
-a short's exit (a buy) would look like a new entry to it. `confirm_trade_entry` refuses `side="short"`
-with `SHORT_NOT_SUPPORTED` rather than guessing.
+a short's exit (a buy) would look like a new entry to it, and on futures an `amount` may be contracts
+rather than base. `bot_start` refuses `trading_mode != "spot"` and `can_short = True` outright — the
+bot does not start — and `confirm_trade_entry` refuses `side="short"` with `SHORT_NOT_SUPPORTED`.
+Neither is guessed at.
 
 ## The fail-open hole this wrapper closes
 
@@ -198,7 +200,7 @@ Two things to know before you copy the numbers:
 | `config.demo.json` | dry-run config, no API keys, `kraken`, `BTC/USDT`, 5m |
 | `make_demo_data.py` | deterministic candles written through freqtrade's own data handler |
 | `demo.py` | the three runs plus the tamper check, each claim asserted |
-| `tests/` | 25 tests that need neither freqtrade nor an exchange |
+| `tests/` | 26 tests that need neither freqtrade nor an exchange |
 
 ## Running it against a live dry-run
 

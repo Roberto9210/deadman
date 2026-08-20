@@ -373,6 +373,20 @@ def test_shorts_are_refused_by_the_spot_long_only_gate(tmp_path):
     assert deny_codes(gate) == ["SHORT_NOT_SUPPORTED"]
 
 
+def test_futures_and_can_short_are_refused_at_startup(tmp_path):
+    """Refused where it is loud - bot_start - and not silently gated wrong."""
+    gate = make_gate(tmp_path)
+    strat = Strat(gate)
+    strat.config["trading_mode"] = "futures"
+    with pytest.raises(ValueError, match="DEADMAN_TRADING_MODE_UNSUPPORTED"):
+        strat.bot_start()
+
+    strat2 = Strat(make_gate(tmp_path / "b"))
+    strat2.can_short = True
+    with pytest.raises(ValueError, match="DEADMAN_SHORTS_UNSUPPORTED"):
+        strat2.bot_start()
+
+
 def test_entry_denied_without_a_gate(tmp_path):
     strat = Strat(None)
     strat.deadman = None
