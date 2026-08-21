@@ -157,14 +157,20 @@ an entry, `True` on an exit.
 What this does **not** give you: `BrokerPort` and `HonestExecutor` are not used (freqtrade owns
 placement, polling, timeout, cancel and startup reconciliation), and the gate never sees position
 adjustments, liquidations, partial exits or stoploss-on-exchange orders — their fills are ledgered,
-not gated. Shorts and futures are refused rather than guessed.
+not gated. Shorts and futures are refused rather than guessed. The complete list, with the freqtrade
+line that proves each one, is
+[**What this integration does NOT cover**](examples/freqtrade/README.md#what-this-integration-does-not-cover)
+— including what was never verified: the backtest was run, `freqtrade trade --dry-run` was not.
 
 **[`examples/freqtrade/`](examples/freqtrade/)** has the whole thing: the wrapper, a demo strategy, 28
 tests that need neither freqtrade nor an exchange, and `demo.py` — three real `freqtrade backtesting`
 runs proving the sentinel stops entries, the daily limit blocks, the ledger records and `verify()`
 passes, plus a fourth check where an edited ledger is rejected with `HASH_MISMATCH`. Every claim there
 carries the file and line in freqtrade that backs it (verified against freqtrade 2026.7 on Python
-3.14.2).
+3.14.2). Those 28 tests and the demo are a **local suite, run by hand**: CI below does not run them —
+freqtrade drags in numpy, pandas, scipy, pyarrow, ccxt and TA-Lib, which is too heavy for a
+3-OS × 3-Python matrix, and the demo needs network access. A freqtrade release can therefore break the
+example without turning the badge red.
 
 ## Install and test
 

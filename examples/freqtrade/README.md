@@ -78,32 +78,59 @@ for exactly one reason.
 a human is taking over, and in freqtrade it means an open trade stays open until the file is removed.
 If that is not what you want from a kill switch, you want a different file.
 
-## What this integration does not give you
+## What this integration does NOT cover
 
-freqtrade owns order placement, polling, the unfilled timeout, the cancel and the startup
-reconciliation of open orders. Running deadman's `HonestExecutor` beside it would mean two write-ahead
-records and two reconcilers for one order, so **`BrokerPort` and `HonestExecutor` are not used here**.
-What you do not get, therefore: the write-ahead client order id before the network call, "presumed
-alive" on a send timeout resolved by client id, and `startup()` reconciliation. Those are freqtrade's
-implementation and freqtrade's guarantees, not deadman's G1–G9.
+Every gap is in this one section — orders the gate never sees, deadman primitives that are not wired,
+modes refused outright, and claims that were never verified. If you read one section before wiring this
+into a bot that holds money, read this one. Line references are to the installed **freqtrade 2026.7**.
 
-Verified coverage gaps in the hooks themselves — the gate never sees these orders:
+### Orders the gate never sees
+
+`confirm_trade_entry` / `confirm_trade_exit` are not called for these, so **deadman does not gate them**.
+All four still reach `order_filled`, so their fills *are* ledgered and counted against the day: they are
+recorded, not authorised.
 
 | Not gated | Why | Evidence |
 |---|---|---|
-| position adjustments (DCA) and order replacements | `confirm_trade_entry` runs only for `mode == "initial"` | `freqtradebot.py:934` |
-| liquidations | cannot be rejected, so the callback is skipped | `freqtradebot.py:2140` |
+| position adjustments (DCA) and order replacements | `confirm_trade_entry` runs only for `mode == "initial"` | `freqtradebot.py:934`, `backtesting.py:1190-1193` |
+| liquidations | forced by the exchange, so the callback is skipped | `freqtradebot.py:2140`, `backtesting.py:912-915` |
 | partial exits | skipped by the same guard (`sub_trade_amt`, `ExitType.PARTIAL_EXIT`) | `freqtradebot.py:2141`, `backtesting.py:912-915` |
-| stoploss-on-exchange orders | placed by `create_stoploss_order`, which never calls the strategy | `freqtradebot.py:1420` |
+| stoploss-on-exchange orders | placed by `create_stoploss_order`, which never consults the strategy | `freqtradebot.py:1420` |
 
-All four still reach `order_filled`, so their fills are ledgered and counted — they are simply not
-*gated*. If you run DCA or partial exits, say so out loud in your own README: this one cannot.
+Concretely: turn on `position_adjustment_enable`, partial exits or `stoploss_on_exchange` and the entry
+gate and the exit gate do not run for those orders — no kill switch, no halt, no daily limit, no order
+sanity. Say so in your own README, because this one cannot cover them.
 
-Also out of scope here: shorts and futures. The shipped exit predicate is `spot_long_only_is_exit`, so
-a short's exit (a buy) would look like a new entry to it, and on futures an `amount` may be contracts
-rather than base. `bot_start` refuses `trading_mode != "spot"` and `can_short = True` outright — the
-bot does not start — and `confirm_trade_entry` refuses `side="short"` with `SHORT_NOT_SUPPORTED`.
-Neither is guessed at.
+### deadman primitives not wired
+
+**`BrokerPort` and `HonestExecutor` are not used.** freqtrade owns placement, polling, the unfilled
+timeout, the cancel and the startup reconciliation of open orders; running `HonestExecutor` beside it
+would mean two write-ahead records and two reconcilers for one order. What you therefore do not get:
+the write-ahead client order id before the network call, "presumed alive" on a send timeout resolved by
+client id, and `startup()` reconciliation. Those are freqtrade's implementation and freqtrade's
+guarantees, not deadman's G1–G9.
+
+**Anchoring is not demonstrated.** The demo's ledger has no external anchor, which makes it weaker
+evidence than an anchored one — see the main README's threat model and
+[`examples/git_anchor_publisher.py`](../git_anchor_publisher.py).
+
+### Modes refused outright
+
+Shorts and futures. The shipped exit predicate is `spot_long_only_is_exit`, so a short's exit (a buy)
+would look like a new entry to it, and on futures an `amount` may be contracts rather than base.
+`bot_start` refuses `trading_mode != "spot"` and `can_short = True` — the bot does not start — and
+`confirm_trade_entry` refuses `side="short"` with `SHORT_NOT_SUPPORTED`. Neither is guessed at.
+
+### Not verified
+
+- **`freqtrade trade --dry-run`: UNVERIFIED.** The command and the config are documented below and the
+  strategy file is the same one, but **no dry-run was ever executed against a live feed**. What was run
+  live is `TickerQuotes` against a real Kraken ticker (bid/ask and a measured latency, entry allowed end
+  to end); everything else about the live path is inferred from the backtest, not observed.
+- **Exchange behaviour under a real order.** The demo is a backtest: it proves that these callbacks, in
+  this order, produce these ledger entries and these denials. No backtest proves anything about a venue.
+- **Partial fills.** freqtrade reports them and this wrapper ledgers them as `PARTIAL_FILL`, but the demo
+  never produced one — that path is covered by a test, not by a run.
 
 ## The fail-open hole this wrapper closes
 
@@ -208,9 +235,29 @@ Two things to know before you copy the numbers:
 | `demo.py` | the three runs plus the tamper check, each claim asserted |
 | `tests/` | 28 tests that need neither freqtrade nor an exchange |
 
-## Running it against a live dry-run
+## Tests and CI
 
-The same strategy file, unchanged, with `"quotes": "ticker"`:
+```bash
+python -m pytest -q examples/freqtrade/tests   # 28 cases; no freqtrade, no exchange, no network
+python examples/freqtrade/demo.py              # 18 assertions; needs freqtrade and network
+```
+
+**Neither runs in the repository's CI, deliberately.** `.github/workflows/deadman.yml` runs
+`pytest -q -rs tests` across three operating systems and three Python versions, and freqtrade drags in
+numpy, pandas, scipy, pyarrow, ccxt and TA-Lib — too heavy for that matrix — while `demo.py` also needs
+network access to the exchange for market metadata. So this is a **documented local suite**: run it by
+hand or in your own pipeline. The mandatory CI keeps testing the library alone, and a bare `pytest` at
+the repo root does not pick these up either, because `pyproject.toml` sets `testpaths = ["tests"]`.
+
+The consequence, said plainly: **a freqtrade release can break this example without turning the badge
+red.** Everything here is pinned to freqtrade 2026.7 by observation, not by a version constraint that
+CI enforces. Re-run the two commands above after upgrading freqtrade.
+
+## Running it against a live dry-run — UNVERIFIED
+
+**Nobody has run this.** It is written down because the wiring is the same one the backtest exercises,
+not because it was observed working; see [Not verified](#not-verified) above. The same strategy file,
+unchanged, with `"quotes": "ticker"`:
 
 ```bash
 freqtrade trade --dry-run --config <your-config> --strategy DeadmanDemoStrategy \
@@ -221,14 +268,3 @@ Dry-run places no orders and needs no API keys, but it does talk to the exchange
 so does `freqtrade backtesting`, which loads market metadata (precision, limits) before it will start.
 That is why `demo.py` needs network access even though it never sends an order. Binance answers `451`
 from some locations; the demo config uses `kraken` for that reason.
-
-## What is not proven here
-
-- Nothing in this example demonstrates deadman's **anchoring**. A ledger with no external anchor is
-  weaker evidence than one with it — see the main README's threat model and
-  `examples/git_anchor_publisher.py`.
-- The demo runs a backtest. It proves that these callbacks, in this order, produce these ledger
-  entries and these denials. It does not prove anything about an exchange's behaviour under a real
-  order, and no backtest can.
-- Partial fills: freqtrade reports them and this wrapper ledgers them as `PARTIAL_FILL`, but the demo
-  never produced one, so that path is covered by a test and not by a run.
