@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from deadman.verify_certificate import (
     EXIT_CONTRADICTED, EXIT_OK, EXIT_UNEVALUABLE, verify_certificate,
 )
@@ -87,6 +89,74 @@ def test_the_truncated_example_is_caught_and_names_what_it_excluded():
     assert rep.recomputed["changeAttemptsWhileSealed"] == 0      # true, over seq 1..6
     assert rep.recomputed["failClosedEpisodes"] == []            # true, over seq 1..6
     assert rep.recomputed["limitRespected"] is True              # true, over seq 1..6
+
+
+#: What every example must report, in full. The limits list is identical across all four
+#: because they share one anchorless ledger; that it is spelled out per example rather than
+#: shared is deliberate - if one of them ever stops being anchorless, this notices.
+EXPECTED_VERDICTS = {
+    "certificate.json": {
+        "exit": EXIT_OK,
+        "contradictions": set(),
+        "could_not_verify": {"NO_EXTERNAL_ANCHOR", "OTHER_VENUES", "PRE_START_BYPASS",
+                             "TRADES_OBSERVED"},
+        "reached": "L1",
+    },
+    "certificate-tampered.json": {
+        "exit": EXIT_CONTRADICTED,
+        "contradictions": {"CLAIM_MISMATCH"},
+        "could_not_verify": {"NO_EXTERNAL_ANCHOR", "OTHER_VENUES", "PRE_START_BYPASS",
+                             "TRADES_OBSERVED"},
+        "reached": "L1",
+    },
+    "certificate-truncated.json": {
+        "exit": EXIT_CONTRADICTED,
+        "contradictions": {"RANGE_TRUNCATED"},
+        "could_not_verify": {"NO_EXTERNAL_ANCHOR", "OTHER_VENUES", "PRE_START_BYPASS",
+                             "TRADES_OBSERVED"},
+        "reached": "L1",
+    },
+    "certificate-unknown-issuer.json": {
+        "exit": EXIT_OK,
+        "contradictions": set(),
+        "could_not_verify": {"NO_EXTERNAL_ANCHOR", "OTHER_VENUES", "PRE_START_BYPASS",
+                             "TRADES_OBSERVED"},
+        "reached": "L1",
+    },
+}
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_VERDICTS))
+def test_each_example_produces_exactly_the_verdict_it_is_published_to_produce(name):
+    """Exit code AND the exact reason sets.
+
+    An exit-code-only assertion passes an example that broke for the wrong reason - the
+    truncated one exits 1 whether it is caught for its truncated range or for a mangled
+    certHash, and only the second means the file stopped teaching anything. Exact sets make a
+    substituted reason as loud as a missing one.
+    """
+    expected = EXPECTED_VERDICTS[name]
+    rep = verify_certificate(_cert(name), _entries())
+
+    assert rep.exit_code == expected["exit"], [str(f) for f in rep.contradictions]
+    assert {f.code for f in rep.contradictions} == expected["contradictions"], (
+        f"{name} is contradicted for different reasons than it is published to demonstrate: "
+        f"{sorted(f.code for f in rep.contradictions)}")
+    assert {f.code for f in rep.unverified} == expected["could_not_verify"], (
+        f"{name} reports different limits than documented: "
+        f"{sorted(f.code for f in rep.unverified)}")
+    assert rep.reached_level == expected["reached"]
+
+
+def test_every_shipped_example_has_a_declared_verdict():
+    """A fifth example must declare what it demonstrates, or this fails rather than letting an
+    undescribed file ship."""
+    shipped = {p.name for p in EX.glob("certificate*.json")}
+    undeclared = sorted(shipped - set(EXPECTED_VERDICTS))
+    assert not undeclared, (
+        "these examples ship without a declared verdict, so nothing pins what they teach: "
+        + ", ".join(undeclared))
+    assert not sorted(set(EXPECTED_VERDICTS) - shipped), "a declared verdict has no example file"
 
 
 def test_the_documented_exit_codes_are_what_the_cli_returns(tmp_path):
