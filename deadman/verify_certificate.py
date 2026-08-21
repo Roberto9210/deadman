@@ -275,16 +275,21 @@ def _check_dialect(entries: Sequence[Mapping[str, Any]], dialect: Dialect) -> Op
     """Fail closed on a declared dialect the file does not match (C17). Returns a reason or None."""
     if not entries:
         return "the ledger has no entries, so the declared dialect cannot be confirmed"
-    first = entries[0]
-    missing = [f for f in dialect.required if f not in first]
-    if not missing:
-        return None
-    other = next((d for d in DIALECTS.values()
-                  if d.name != dialect.name and all(f in first for f in d.required)), None)
-    if other is not None:
-        return (f"certificate declares '{dialect.name}' but the ledger is written in "
-                f"'{other.name}' (missing {missing})")
-    return f"certificate declares '{dialect.name}' but the ledger lacks {missing}"
+
+    # Every entry, not just the first: a ledger with one dialect on line 1 and another further
+    # down would otherwise pass this check and fail later as a confusing chain break.
+    for i, e in enumerate(entries):
+        missing = [f for f in dialect.required if f not in e]
+        if not missing:
+            continue
+        where = f"entry {i + 1}" + (f" (seq {e[dialect.f_seq]})" if dialect.f_seq in e else "")
+        other = next((d for d in DIALECTS.values()
+                      if d.name != dialect.name and all(f in e for f in d.required)), None)
+        if other is not None:
+            return (f"certificate declares '{dialect.name}' but {where} is written in "
+                    f"'{other.name}' (missing {missing})")
+        return f"certificate declares '{dialect.name}' but {where} lacks {missing}"
+    return None
 
 
 def _verify_chain(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
@@ -318,6 +323,14 @@ def _verify_chain(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
 
 _BOUNDARY = ("FAIL_CLOSED_ENTERED", "FAIL_CLOSED_CLEARED")
 
+#: Events whose absence from a certificate changes what it says about the trader. Used only to
+#: describe what a declared range leaves out - never to recompute a claim.
+_MATERIAL = (
+    "LIMIT_BREACHED", "ORDER_REJECTED_LOCKED", "CONFIG_CHANGE_REJECTED", "FAIL_CLOSED_ENTERED",
+    "CLOCK_ANOMALY", "CLOCK_SUSPECT", "LOCKOUT_INCOMPLETE", "SEAL_MISMATCH", "CONFIG_TAMPERED",
+    "PNL_DISAGREEMENT", "LEDGER_VERIFY_FAILED", "STATE_CORRUPT",
+)
+
 
 def _events_in_range(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
                      from_seq: int, to_seq: int) -> list[Mapping[str, Any]]:
@@ -325,6 +338,76 @@ def _events_in_range(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
             if isinstance(e.get(dialect.f_seq), int) and from_seq <= e[dialect.f_seq] <= to_seq]
     rows.sort(key=lambda e: e[dialect.f_seq])
     return rows
+
+
+def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mapping[str, Any]],
+                                dialect: Dialect, from_seq: int, to_seq: int,
+                                rep: "CertReport") -> None:
+    """The most dangerous lie the format allows, and it took an attack to find it.
+
+    Every claim is recomputed over the DECLARED range, so a certificate that simply declares a
+    shorter range hides whatever falls outside it. Truncating at the entry before LIMIT_BREACHED
+    produces `limitRespected: true` that recomputes perfectly and verifies clean.
+
+    What makes it detectable is that the certificate also names a DAY. If the ledger holds that
+    day's DAY_OPENED before the range starts, or its DAY_CLOSED after the range ends, then the
+    document does not cover the session it claims to describe, and says so by omission.
+
+    When the day never closed - an export taken mid-session, which is the normal case - there is
+    nothing to anchor against, and the verifier says exactly that instead of pretending."""
+    day = (cert.get("session") or {}).get("dayKey")
+    ev, seqf = dialect.f_event, dialect.f_seq
+
+    def day_of(e: Mapping[str, Any]) -> Any:
+        return (e.get(dialect.f_payload) or {}).get("dayKey")
+
+    outside_before, outside_after = [], []
+    for e in entries:
+        seq = e.get(seqf)
+        if not isinstance(seq, int):
+            continue
+        if seq < from_seq:
+            outside_before.append(e)
+        elif seq > to_seq:
+            outside_after.append(e)
+
+    if day is not None:
+        opened = [e for e in outside_before if e.get(ev) == "DAY_OPENED" and day_of(e) == day]
+        closed = [e for e in outside_after if e.get(ev) == "DAY_CLOSED" and day_of(e) == day]
+        hidden = [e for e in outside_before + outside_after if e.get(ev) in _MATERIAL]
+        edge = closed[0] if closed else (opened[0] if opened else None)
+
+        if edge is not None:
+            where = ("that day's DAY_CLOSED is at seq %s, past the declared range" % edge[seqf]
+                     if closed else
+                     "that day's DAY_OPENED is at seq %s, before the declared range" % edge[seqf])
+            # Severity follows the harm, not the shape. A range that stops early with nothing
+            # material outside it is an incomplete document; a range that stops early with a
+            # breach outside it is the lie this check exists for.
+            if hidden:
+                names = sorted({str(e.get(ev)) for e in hidden})
+                rep.contradict("RANGE_TRUNCATED",
+                               f"the certificate is for {day} but {where} {from_seq}..{to_seq}, "
+                               f"and {len(hidden)} material event(s) fall outside it "
+                               f"({', '.join(names)}) - the range excludes part of the session it "
+                               f"claims to describe")
+            else:
+                rep.cannot_verify("SESSION_NOT_FULLY_COVERED",
+                                  f"the certificate is for {day} but {where} {from_seq}..{to_seq}: "
+                                  f"this is part of that session, not all of it. Nothing material "
+                                  f"sits outside the range, so nothing is being hidden - but for a "
+                                  f"complete day, export again after the session closes")
+            return
+
+    material_after = [e for e in outside_after if e.get(ev) in _MATERIAL]
+    if material_after:
+        names = sorted({str(e.get(ev)) for e in material_after})
+        rep.cannot_verify("POST_RANGE_MATERIAL_EVENTS",
+                          f"{len(material_after)} event(s) after the declared range are of a kind "
+                          f"that changes what a certificate says ({', '.join(names)}); with no "
+                          f"DAY_CLOSED for this session the verifier cannot tell an export taken "
+                          f"mid-session from a range truncated to exclude them - ask for a "
+                          f"certificate covering the closed session")
 
 
 def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
@@ -531,6 +614,8 @@ def verify_certificate(cert: Mapping[str, Any],
                        f"{len(absent)} entr{'y is' if len(absent) == 1 else 'ies are'} "
                        f"missing from the ledger (first: {absent[0]})")
 
+    _check_range_covers_its_day(cert, ledger_entries, dialect, from_seq, to_seq, rep)
+
     # ---- chain
     rep.chain_ok, rep.broken_seq = _verify_chain(ledger_entries, dialect, from_seq, to_seq)
     if not rep.chain_ok:
@@ -668,11 +753,26 @@ def verify_series(certs: Sequence[Mapping[str, Any]]) -> CertReport:
         rep.cannot_evaluate("SERIES_EMPTY", "no certificates supplied")
         return rep
 
+    seen_days: dict = {}
     prev_hash: Optional[str] = None
     prev_day: Optional[str] = None
     for c in ordered:
         day = (c.get("session") or {}).get("dayKey")
         declared_prev = c.get("previousCertHash")
+
+        # A series is one certificate per day. Two for the same day means one of them is being
+        # substituted for the other, and a reader cannot tell which.
+        if day in seen_days:
+            rep.contradict("SERIES_DUPLICATE_DAY",
+                           f"two certificates in this series are for {day} "
+                           f"({str(seen_days[day])[:12]}... and {str(c.get('certHash'))[:12]}...)")
+        seen_days[day] = c.get("certHash")
+
+        # A certificate cannot be its own predecessor. A chain that closes on itself has no
+        # beginning, so nothing dates it.
+        if declared_prev is not None and declared_prev == c.get("certHash"):
+            rep.contradict("SERIES_SELF_REFERENCE",
+                           f"the certificate for {day} names itself as previousCertHash")
         if prev_hash is not None and declared_prev != prev_hash:
             rep.contradict("SERIES_BROKEN",
                            f"certificate for {day} carries previousCertHash "

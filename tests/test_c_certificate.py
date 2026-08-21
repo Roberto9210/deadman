@@ -95,8 +95,9 @@ DISCONNECT_DAY = QUIET_DAY[:5] + [
 
 def make_cert(entries, dialect=GUARDIAN_CORE_V1, day="2026-08-21", *, honest=True,
               trust="L1", anchors=None, prev_cert=None, gaps=None, overrides=None,
-              drop=()):
-    lo, hi = 1, max(e["seq"] for e in entries)
+              drop=(), lo=None):
+    lo = 1 if lo is None else lo
+    hi = max(e["seq"] for e in entries)
     c = recompute_claims(entries, dialect, lo, hi, True)
     cert = {
         "certVersion": 1,
