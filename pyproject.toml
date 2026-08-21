@@ -35,6 +35,11 @@ dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+# Optional, and ONLY for verifying a certificate's Ed25519 signature (L3). The base package
+# keeps zero runtime dependencies: `dependencies = []` above is unchanged, and the verifier
+# reaches this through importlib so the stdlib-only AST scan still passes. Without the extra
+# it reports the signature as NOT_VERIFIED and degrades to L2 - never to "valid".
+verify-sig = ["cryptography>=42"]
 
 [project.urls]
 Homepage = "https://github.com/Roberto9210/deadman"
