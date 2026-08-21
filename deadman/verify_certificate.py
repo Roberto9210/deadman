@@ -345,15 +345,25 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
     rejected_ids.discard(None)
 
     # Episodes, not causes. An episode runs from FAIL_CLOSED_ENTERED to its
-    # FAIL_CLOSED_CLEARED, or stays open to the end of the range.
+    # FAIL_CLOSED_CLEARED, or stays open to the end of the range, AND it includes the event
+    # that triggered it (SPEC A.2.1): an episode that leaves out its own cause tells the
+    # story wrong. The rule is positional and published - `triggerSeq` names the exact entry
+    # counted, so nothing is inferred from the text of `reason`.
     episodes: list[dict] = []
     current: Optional[dict] = None
-    for r in rows:
+    for idx, r in enumerate(rows):
         name = r.get(ev)
         if name == "FAIL_CLOSED_ENTERED":
             if current is None:
+                trigger = rows[idx - 1] if idx > 0 else None
+                if trigger is not None and trigger.get(ev) in _BOUNDARY:
+                    trigger = None
                 current = {"fromSeq": r[dialect.f_seq], "fromUtc": r.get(dialect.f_ts),
-                           "open": True, "reasons": {}}
+                           "open": True, "reasons": {},
+                           "triggerSeq": trigger[dialect.f_seq] if trigger else None,
+                           "triggerEvent": trigger.get(ev) if trigger else None}
+                if trigger is not None:
+                    current["reasons"][trigger[ev]] = 1
         elif name == "FAIL_CLOSED_CLEARED" and current is not None:
             current["toSeq"] = r[dialect.f_seq]
             current["toUtc"] = r.get(dialect.f_ts)

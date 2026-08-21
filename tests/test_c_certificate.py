@@ -350,13 +350,47 @@ def test_c5_anchor_coverage_stops_where_the_anchor_stops():
 # ================================================================== C6
 
 def test_c6_fail_closed_episodes_are_episodes_not_causes():
+    """One episode, and it includes the event that triggered it (SPEC A.2.1).
+
+    DISCONNECT_DAY has ACCOUNT_UNKNOWN at seq 6 (the trigger), FAIL_CLOSED_ENTERED at 7,
+    two more ACCOUNT_UNKNOWN inside, then CLEARED: three causes, not two. An episode that
+    leaves out its own cause tells the story wrong."""
     entries = gledger(DISCONNECT_DAY)
     rep = verify_certificate(make_cert(entries), entries)
     eps = rep.recomputed["failClosedEpisodes"]
     assert len(eps) == 1, eps
-    assert eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 2}
+    assert eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 3}
+    assert eps[0]["triggerSeq"] == 6 and eps[0]["triggerEvent"] == "ACCOUNT_UNKNOWN"
+    assert eps[0]["fromSeq"] == 7, "the block began at ENTERED; counting the trigger must not lengthen it"
     assert eps[0]["open"] is False
     assert rep.ok
+
+
+def test_c6_an_episode_with_nothing_before_it_has_no_trigger():
+    """The rule is positional, so it must say so when there is no position to look at."""
+    entries = gledger([("FAIL_CLOSED_ENTERED", {"reason": "PnlUncomputable"}),
+                       ("FAIL_CLOSED_CLEARED", {"previousReason": "PnlUncomputable"})])
+    rep = verify_certificate(make_cert(entries), entries)
+    ep = rep.recomputed["failClosedEpisodes"][0]
+    assert ep["triggerSeq"] is None and ep["triggerEvent"] is None
+    assert ep["reasons"] == {}
+
+
+def test_c6_a_boundary_marker_is_never_counted_as_a_trigger():
+    """Back-to-back episodes: the previous CLEARED must not become the next one's cause."""
+    entries = gledger([
+        ("DAY_OPENED", {"dayKey": "2026-08-21"}),
+        ("ACCOUNT_UNKNOWN", {"detail": "Disconnected"}),
+        ("FAIL_CLOSED_ENTERED", {"reason": "AccountUnknown"}),
+        ("FAIL_CLOSED_CLEARED", {"previousReason": "AccountUnknown"}),
+        ("FAIL_CLOSED_ENTERED", {"reason": "PnlUncomputable"}),
+        ("FAIL_CLOSED_CLEARED", {"previousReason": "PnlUncomputable"}),
+    ])
+    rep = verify_certificate(make_cert(entries), entries)
+    eps = rep.recomputed["failClosedEpisodes"]
+    assert len(eps) == 2
+    assert eps[0]["triggerEvent"] == "ACCOUNT_UNKNOWN" and eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 1}
+    assert eps[1]["triggerEvent"] is None and eps[1]["reasons"] == {}
 
 
 def test_c6_hiding_an_episode_is_a_contradiction():
