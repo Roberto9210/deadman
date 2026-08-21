@@ -10,7 +10,7 @@ Execution-safety primitives for automated trading systems. Zero runtime dependen
 strategy-agnostic. Every claim below has a test or a spec section behind it — the links are the argument.
 
 Specification: [`docs/SPEC.md`](docs/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
-Conformance statement, exact: **11 of 13 test groups implemented, 230 collected cases (228 pass and 2 skips in CI,
+Conformance statement, exact: **11 of 13 test groups implemented, 234 collected cases (232 pass and 2 skips in CI,
 each with its reason printed), 2 elements declared out of scope with rationale** — see [SPEC §6b](docs/SPEC.md).
 The two skips: one design skip in `test_g5_order_sanity.py`, and one case that runs only on a machine with a live
 guardian ledger, because that file is a trader's session data and is deliberately not vendored here.
@@ -208,7 +208,7 @@ Full guide, including the three trust layers and what none of them prove:
 
 ```bash
 pip install deadman-kit        # installs as deadman-kit, imports as deadman; zero runtime dependencies
-python -m pytest -q tests   # 230 cases; Windows, Linux, macOS in CI
+python -m pytest -q tests   # 234 cases; Windows, Linux, macOS in CI
 ```
 
 CI: `.github/workflows/deadman.yml` — ubuntu/windows/macos × Python 3.10/3.12/3.14, plus a job that builds
