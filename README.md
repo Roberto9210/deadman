@@ -10,9 +10,9 @@ Execution-safety primitives for automated trading systems. Zero runtime dependen
 strategy-agnostic. Every claim below has a test or a spec section behind it — the links are the argument.
 
 Specification: [`docs/SPEC.md`](docs/SPEC.md) (v0.1, closed 2026-08-18; written before the code).
-Conformance statement, exact: **11 of 13 test groups implemented, 228 collected cases (227 pass, 1 platform skip
+Conformance statement, exact: **11 of 13 test groups implemented, 229 collected cases (228 pass, 1 platform skip
 with its reason in the test), 2 elements declared out of scope with rationale** — see [SPEC §6b](docs/SPEC.md).
-Not "13/13". The certificate verifier adds 63 of those cases: 18 named guarantees, 13 adversarial probes, and the
+Not "13/13". The certificate verifier adds 64 of those cases: 18 named guarantees, 13 adversarial probes, and the
 shipped example checked on every run so the documentation cannot drift from the tool:
 [`docs/verify-certificate.md`](docs/verify-certificate.md).
 
@@ -191,9 +191,13 @@ prints the trust layer it actually reached and an explicit list of what it could
 list is printed on success too. Exit `0` verified, `1` contradicted, `2` could not evaluate; the last two
 are kept apart so a broken file cannot be mistaken for a pass.
 
-A worked example ships in [`examples/certificate/`](examples/certificate/): a ledger, an honest
-certificate over it, and the same certificate with one number quietly changed. The tampered one has a
-correct `certHash` and an intact chain — it falls only because the verifier counts the events itself.
+A worked example ships in [`examples/certificate/`](examples/certificate/): one ledger and three
+certificates over it — honest, falsified, and truncated. The falsified one has a correct `certHash` and an
+intact chain, and falls only because the verifier counts the events itself. The truncated one contains no
+false statement at all: it declares a shorter range so the inconvenient part of the day falls outside it,
+and **it verified clean until a check on the range itself was added**. That case, why recomputing claims
+can never catch it, and how the fix was calibrated so honest mid-session exports are not called liars, is
+written up in full — it is the most useful page in this repository.
 
 Full guide, including the three trust layers and what none of them prove:
 [**`docs/verify-certificate.md`**](docs/verify-certificate.md).
@@ -202,7 +206,7 @@ Full guide, including the three trust layers and what none of them prove:
 
 ```bash
 pip install deadman-kit        # installs as deadman-kit, imports as deadman; zero runtime dependencies
-python -m pytest -q tests   # 228 cases; Windows, Linux, macOS in CI
+python -m pytest -q tests   # 229 cases; Windows, Linux, macOS in CI
 ```
 
 CI: `.github/workflows/deadman.yml` — ubuntu/windows/macos × Python 3.10/3.12/3.14, plus a job that builds

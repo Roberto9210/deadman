@@ -123,9 +123,20 @@ def main() -> None:
     (HERE / "certificate-tampered.json").write_text(
         canonical_json(liar).decode("utf-8"), encoding="utf-8")
 
+    # The truncation attack: the SAME ledger, but the certificate declares a range that stops
+    # before the two refused attempts and the fail-closed episode. Every claim in it is
+    # recomputed honestly over that window, so the document is internally perfect. It is the
+    # attack that got past the verifier until a check on the range itself was added.
+    truncated = build_certificate(entries[:6], salt="c1d0f4a9" * 8)
+    truncated["subject"]["alias"] = "example-trader-truncated"
+    truncated["certHash"] = hashlib.sha256(_cert_preimage(truncated)).hexdigest()
+    (HERE / "certificate-truncated.json").write_text(
+        canonical_json(truncated).decode("utf-8"), encoding="utf-8")
+
     print(f"wrote {len(entries)} ledger entries")
-    print("certificate.json           certHash", honest["certHash"][:16])
-    print("certificate-tampered.json  certHash", liar["certHash"][:16])
+    print("certificate.json            certHash", honest["certHash"][:16])
+    print("certificate-tampered.json   certHash", liar["certHash"][:16])
+    print("certificate-truncated.json  certHash", truncated["certHash"][:16])
 
 
 if __name__ == "__main__":

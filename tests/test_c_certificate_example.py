@@ -28,7 +28,8 @@ def _cert(name):
 
 
 def test_the_shipped_example_files_exist():
-    for name in ("ledger.jsonl", "certificate.json", "certificate-tampered.json", "make_example.py"):
+    for name in ("ledger.jsonl", "certificate.json", "certificate-tampered.json",
+                 "certificate-truncated.json", "make_example.py"):
         assert (EX / name).exists(), f"examples/certificate/{name} is missing"
 
 
@@ -60,6 +61,24 @@ def test_the_tampered_example_is_contradicted_for_the_documented_reason():
     assert rep.cert_hash_ok, "the point of this example is that hashing alone would not catch it"
 
 
+def test_the_truncated_example_is_caught_and_names_what_it_excluded():
+    """The attack documented under "The attack that got past this verifier". Every claim in it
+    is TRUE over the window it declares; it falls on the range, not on any number."""
+    rep = verify_certificate(_cert("certificate-truncated.json"), _entries())
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "RANGE_TRUNCATED" in {f.code for f in rep.contradictions}
+
+    detail = " ".join(f.detail for f in rep.contradictions)
+    assert "CONFIG_CHANGE_REJECTED" in detail and "FAIL_CLOSED_ENTERED" in detail
+    assert "DAY_CLOSED is at seq 16" in detail
+
+    # Everything else about the document is impeccable, which is the whole point.
+    assert rep.chain_ok and rep.cert_hash_ok
+    assert rep.recomputed["changeAttemptsWhileSealed"] == 0      # true, over seq 1..6
+    assert rep.recomputed["failClosedEpisodes"] == []            # true, over seq 1..6
+    assert rep.recomputed["limitRespected"] is True              # true, over seq 1..6
+
+
 def test_the_documented_exit_codes_are_what_the_cli_returns(tmp_path):
     def run(cert):
         return subprocess.run(
@@ -86,7 +105,8 @@ def test_the_generator_reproduces_the_checked_in_files(tmp_path):
     """The example is regenerable, so nobody has to trust that the committed bytes came from
     the committed script."""
     before = {n: (EX / n).read_bytes()
-              for n in ("ledger.jsonl", "certificate.json", "certificate-tampered.json")}
+              for n in ("ledger.jsonl", "certificate.json", "certificate-tampered.json",
+                        "certificate-truncated.json")}
     r = subprocess.run([sys.executable, str(EX / "make_example.py")],
                        capture_output=True, text=True, cwd=str(ROOT))
     assert r.returncode == 0, r.stderr

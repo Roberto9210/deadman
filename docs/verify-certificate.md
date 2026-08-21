@@ -34,8 +34,9 @@ Concretely, in order:
 2. **Chain.** Recomputes every hash over the declared range and checks each link. A broken chain
    names the first `seq` that fails.
 3. **Range.** Checks that the declared range actually covers the session the certificate names.
-   This exists because of a real hole: claims are recomputed over the *declared* range, so a
-   certificate that simply declares a shorter one hides everything outside it.
+   This step exists because of a hole this verifier had and did not catch: claims are recomputed
+   over the *declared* range, so a certificate that declares a shorter one hides everything
+   outside it, truthfully. [The full account is below](#the-attack-that-got-past-this-verifier).
 4. **Claims.** Recomputes `limitRespected`, `lockoutsTriggered`, `changeAttemptsWhileSealed`,
    `ordersRejectedWhileLocked`, `failClosedEpisodes` and `clockAnomalies` from the events and
    contradicts any that disagree.
@@ -49,8 +50,10 @@ Concretely, in order:
 ## Try it right now, on files that ship with the package
 
 The repository carries a worked example so you can run the verifier before anyone hands you a
-real certificate. `examples/certificate/` holds a ledger, an honest certificate over it, and the
-same certificate with one number quietly changed.
+real certificate. `examples/certificate/` holds one ledger and three certificates over it: an
+honest one, one with a number quietly changed, and one that lies by declaring a shorter range —
+that last one is [its own section below](#the-attack-that-got-past-this-verifier), because it is
+the case this verifier was wrong about.
 
 ### 1. An honest certificate
 
@@ -214,13 +217,101 @@ quietly.
 
 ---
 
+## The attack that got past this verifier
+
+Published because it is the useful part. Every checked-in example above passes or fails as
+designed; this one is the case the tool was wrong about, how it was wrong, and what it cost to
+fix. Run it yourself:
+
+```bash
+python -m deadman.verify_certificate examples/certificate/certificate-truncated.json examples/certificate/ledger.jsonl
+```
+
+### The attack
+
+Every claim is recomputed over the range the certificate **declares**. So a liar does not
+falsify a number — falsified numbers are exactly what recomputation catches. **A liar declares
+a shorter range.**
+
+`certificate-truncated.json` is built over the same ledger as the honest example and stops at
+`seq 6`, one entry before the first refused attempt to loosen the limit. Everything in it is
+then computed honestly over that window:
+
+- `changeAttemptsWhileSealed: 0` — true, over seq 1..6
+- `failClosedEpisodes: []` — true, over seq 1..6
+- `limitRespected: true` — true, over seq 1..6
+- chain recomputes, `certHash` matches, document internally perfect
+
+Before the fix, this verified **clean, at L1, exit 0**. Nothing in it was false. It was a set of
+true statements about a window chosen so the inconvenient part of the day fell outside it.
+
+### Why no amount of claim-checking finds it
+
+The verifier's central idea is *do not trust the document, recompute from the events*. That idea
+is what fails here, and it fails structurally rather than by oversight: the recomputation is
+**parameterised by the range the document supplies**. Recomputing harder, adding claims, or
+comparing more fields would all have agreed with the liar, because the liar and the verifier were
+reading the same six entries and doing the same correct arithmetic on them.
+
+A dishonest *answer* is caught by recomputing. A dishonest *question* is not.
+
+### How it is closed
+
+Using the one thing a certificate cannot truncate away: **it names a day.** If the ledger holds
+that day's `DAY_OPENED` before the declared range, or its `DAY_CLOSED` after it, the document
+does not cover the session it claims to describe.
+
+```
+CONTRADICTIONS - the certificate does not survive its own evidence:
+  - RANGE_TRUNCATED: the certificate is for 2026-08-19 but that day's DAY_CLOSED is at
+    seq 16, past the declared range 1..6, and 3 material event(s) fall outside it
+    (CONFIG_CHANGE_REJECTED, FAIL_CLOSED_ENTERED) - the range excludes part of the session
+    it claims to describe
+
+RESULT: CONTRADICTED (exit 1). 1 finding(s).
+```
+
+The finding names what was excluded. A reader should not have to diff two files to learn what a
+certificate left out.
+
+### How it is calibrated, which is the harder half
+
+The obvious fix — *contradict any certificate whose range does not cover its whole day* — is
+wrong, and shipping it would have made the check worthless.
+
+A trader who exports at 14:00 on a session that closes at 17:00 produces exactly that shape. So
+does someone hiding a breach. Treat both as lies and every honest mid-session export is
+slandered; people learn the finding means nothing and stop reading it. **A check that cries wolf
+is a check that gets ignored, which is the same as not having it.**
+
+So severity follows the harm, not the shape:
+
+| situation | verdict |
+|---|---|
+| Range stops inside the session, **nothing material outside it** | `SESSION_NOT_FULLY_COVERED`, **exit 0**. An incomplete document, not a lie. It says so, and suggests exporting again after the session closes |
+| Range stops inside the session, **material events outside it** | `RANGE_TRUNCATED`, **exit 1**, naming them |
+| Material events outside the range, **no `DAY_CLOSED` to anchor on** | `POST_RANGE_MATERIAL_EVENTS`, **exit 0** — it says it cannot tell an early export from a truncation, rather than picking whichever side is convenient |
+
+"Material" means events whose absence changes what the document says about the trader:
+`LIMIT_BREACHED`, `ORDER_REJECTED_LOCKED`, `CONFIG_CHANGE_REJECTED`, `FAIL_CLOSED_ENTERED`,
+clock anomalies, and the tamper events. They are used **only** to describe what a range leaves
+out — never to recompute a claim.
+
+### What it cost
+
+The check was found by asking "what have we not tried?" *after* all eighteen named guarantees
+were green, which is the only moment that question gets an interesting answer. Eighteen
+guarantees, a mutation-tested suite, and an independent second implementation had all agreed
+that the verifier was correct — and it was, at everything it had been asked.
+
+Third-party anchors are the deeper answer to this whole family of problem, and they are worth
+asking for. But an anchor only proves the ledger is unchanged; it says nothing about which slice
+of it a certificate chose to describe.
+
 ## If you find a case it misses
 
-That is the interesting outcome, and it has already happened once: the range check in step 3
-exists because a certificate truncated one entry before a breach verified clean, with every
-recomputed number agreeing, because the arithmetic was honest over a window chosen to exclude
-the truth.
+That is the interesting outcome, and the section above is what it looks like when it happens.
 
 The adversarial suite is `tests/test_c_certificate.py` (the eighteen named guarantees) and
-`tests/test_c_certificate_attacks.py` (probes invented afterwards). Open an issue with a
-certificate and ledger that should be refused and is not.
+`tests/test_c_certificate_attacks.py` (thirteen probes invented afterwards, including this one).
+Open an issue with a certificate and a ledger that should be refused and is not.
