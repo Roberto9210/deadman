@@ -193,11 +193,12 @@ prints the trust layer it actually reached and an explicit list of what it could
 list is printed on success too. Exit `0` verified, `1` contradicted, `2` could not evaluate; the last two
 are kept apart so a broken file cannot be mistaken for a pass.
 
-A worked example ships in [`examples/certificate/`](examples/certificate/): one ledger and three
-certificates over it — honest, falsified, and truncated. The falsified one has a correct `certHash` and an
-intact chain, and falls only because the verifier counts the events itself. The truncated one contains no
-false statement at all: it declares a shorter range so the inconvenient part of the day falls outside it,
-and **it verified clean until a check on the range itself was added**. That case, why recomputing claims
+A worked example ships in [`examples/certificate/`](examples/certificate/): one ledger and four
+certificates over it — honest, falsified, truncated, and one whose issuer fields are omitted because the
+emitter could not determine them. The falsified one has a correct `certHash` and an intact chain, and falls
+only because the verifier counts the events itself. The truncated one contains no false statement at all:
+it declares a shorter range so the inconvenient part of the day falls outside it, and **it verified clean
+until a check on the range itself was added**. That case, why recomputing claims
 can never catch it, and how the fix was calibrated so honest mid-session exports are not called liars, is
 written up in full — it is the most useful page in this repository.
 

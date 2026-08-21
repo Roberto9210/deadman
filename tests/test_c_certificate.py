@@ -103,7 +103,10 @@ def make_cert(entries, dialect=GUARDIAN_CORE_V1, day="2026-08-21", *, honest=Tru
     cert = {
         "certVersion": 1,
         "ledgerDialect": dialect.name,
-        "issuer": {"tool": "deadman-guardian", "version": "0.1.0", "buildHash": "test"},
+        # Same rules the shipped examples obey (test_c_certificate_example_hygiene.py):
+        # no filler, buildHash 16 lowercase hex, version in the emitter's shape.
+        "issuer": {"tool": "deadman-guardian", "version": "0.1.0-beta+" + "0" * 40,
+                   "buildHash": hashlib.sha256(b"fixture build").hexdigest()[:16]},
         "subject": {"alias": "tester", "accounts": ["acct-hash"]},
         "session": {"dayKey": day, "openedUtc": TS % 0, "closedUtc": TS % 59,
                     "timezone": "America/Chicago"},

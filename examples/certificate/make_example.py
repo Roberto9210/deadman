@@ -64,13 +64,28 @@ def build_ledger() -> list[dict]:
     return out
 
 
-def build_certificate(entries: list[dict], salt: str) -> dict:
+#: The shape IssuerIdentity.VersionOf emits: semantic version, pre-release suffix, and the
+#: source commit the SDK appends. Synthetic here, but the same form a real certificate carries.
+EXAMPLE_VERSION = "0.1.0-beta+0000000000000000000000000000000000000000"
+
+#: The shape IssuerIdentity.BuildHashOf emits: 16 lowercase hex, sha256 over the assembly's
+#: bytes. Derived below from synthetic bytes, so it is a real hash of something that is not a
+#: real build - which is exactly what an example should be.
+EXAMPLE_BUILD_HASH = hashlib.sha256(b"deadman-guardian example build, not a real assembly")\
+    .hexdigest()[:16]
+
+
+def build_certificate(entries: list[dict], salt: str, *, issuer_known: bool = True) -> dict:
     lo, hi = 1, max(e["seq"] for e in entries)
     c = recompute_claims(entries, GUARDIAN_CORE_V1, lo, hi, True)
     cert = {
         "certVersion": 1,
         "ledgerDialect": "guardian-core-v1",
-        "issuer": {"tool": "deadman-guardian", "version": "0.1.0", "buildHash": "example"},
+        # Rule 1: a value the emitter cannot determine is OMITTED, never defaulted. The
+        # unknown-issuer example below exercises that branch so the published set shows it.
+        "issuer": ({"tool": "deadman-guardian", "version": EXAMPLE_VERSION,
+                    "buildHash": EXAMPLE_BUILD_HASH}
+                   if issuer_known else {"tool": "deadman-guardian"}),
         "subject": {"alias": "example-trader",
                     "accounts": [hashlib.sha256(f"{salt}:Sim101".encode()).hexdigest()[:16]]},
         "session": {"dayKey": DAY, "openedUtc": ts(7), "timezone": "America/Chicago"},
@@ -139,10 +154,20 @@ def main() -> None:
     (HERE / "certificate-truncated.json").write_text(
         canonical_json(truncated).decode("utf-8"), encoding="utf-8", newline="\r\n")
 
+    # A clean day whose emitter could not determine its own version or build hash - the
+    # branch rule 1 describes. One lesson per file: this one teaches omission and nothing else,
+    # which is why it is not folded into the truncated-range example.
+    unknown = build_certificate(entries, salt="c1d0f4a9" * 8, issuer_known=False)
+    unknown["subject"]["alias"] = "example-trader-unknown-issuer"
+    unknown["certHash"] = hashlib.sha256(_cert_preimage(unknown)).hexdigest()
+    (HERE / "certificate-unknown-issuer.json").write_text(
+        canonical_json(unknown).decode("utf-8"), encoding="utf-8", newline="\r\n")
+
     print(f"wrote {len(entries)} ledger entries")
     print("certificate.json            certHash", honest["certHash"][:16])
     print("certificate-tampered.json   certHash", liar["certHash"][:16])
     print("certificate-truncated.json  certHash", truncated["certHash"][:16])
+    print("certificate-unknown-issuer  certHash", unknown["certHash"][:16], "(issuer fields omitted)")
 
 
 if __name__ == "__main__":
