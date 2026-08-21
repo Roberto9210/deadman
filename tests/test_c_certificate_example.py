@@ -111,6 +111,18 @@ def test_the_documented_exit_codes_are_what_the_cli_returns(tmp_path):
     assert "COULD NOT EVALUATE" in ugly.stderr
 
 
+def test_the_shipped_bytes_carry_this_repos_line_endings():
+    """CI went red on Linux and macOS because the generator used the platform default: the
+    checked-in blob is CRLF (.gitattributes freezes it with `* -text`, and states "Every blob
+    in this repo is CRLF"), and a POSIX runner wrote LF. Pinned here so the invariant is a
+    test rather than a habit."""
+    raw = (EX / "ledger.jsonl").read_bytes()
+    crlf = b"\r\n"
+    lf = b"\n"
+    assert raw.count(crlf) == 16
+    assert raw.count(lf) - raw.count(crlf) == 0, "a bare LF crept in"
+
+
 def test_the_generator_reproduces_the_checked_in_files(tmp_path):
     """The example is regenerable, so nobody has to trust that the committed bytes came from
     the committed script."""

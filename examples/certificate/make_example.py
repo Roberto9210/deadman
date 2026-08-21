@@ -8,7 +8,8 @@ the hashes in the certificates are real hashes.
     python examples/certificate/make_example.py
 
 `tests/test_c_certificate_example.py` runs the shipped files on every test run, so this
-example cannot rot into a lie about what the tool does.
+example cannot rot into a lie about what the tool does - including a check that these exact
+bytes come back out of this script, which is why the writes below pin their line endings.
 """
 
 from __future__ import annotations
@@ -105,13 +106,18 @@ def build_certificate(entries: list[dict], salt: str) -> dict:
 def main() -> None:
     HERE.mkdir(parents=True, exist_ok=True)
     entries = build_ledger()
+    # newline="\r\n" on every write, not the platform default. This repository freezes line
+    # endings (`* -text` in .gitattributes, "Every blob in this repo is CRLF"), so a file
+    # generated on a POSIX runner with the default translation writes LF and then fails to
+    # reproduce against the checked-in blob. A generated artefact has to be the same bytes
+    # everywhere - the same rule the ledger hashing lives by, applied to the file itself.
     (HERE / "ledger.jsonl").write_text(
         "\n".join(json.dumps(e, sort_keys=True, separators=(",", ":")) for e in entries) + "\n",
-        encoding="utf-8")
+        encoding="utf-8", newline="\r\n")
 
     honest = build_certificate(entries, salt="c1d0f4a9" * 8)
     (HERE / "certificate.json").write_text(
-        canonical_json(honest).decode("utf-8"), encoding="utf-8")
+        canonical_json(honest).decode("utf-8"), encoding="utf-8", newline="\r\n")
 
     # The same day, with the two refused attempts to loosen the limit quietly zeroed. Everything
     # else about it is untouched, including the certHash, which is recomputed so the document is
@@ -121,7 +127,7 @@ def main() -> None:
     liar["subject"]["alias"] = "example-trader-lying"
     liar["certHash"] = hashlib.sha256(_cert_preimage(liar)).hexdigest()
     (HERE / "certificate-tampered.json").write_text(
-        canonical_json(liar).decode("utf-8"), encoding="utf-8")
+        canonical_json(liar).decode("utf-8"), encoding="utf-8", newline="\r\n")
 
     # The truncation attack: the SAME ledger, but the certificate declares a range that stops
     # before the two refused attempts and the fail-closed episode. Every claim in it is
@@ -131,7 +137,7 @@ def main() -> None:
     truncated["subject"]["alias"] = "example-trader-truncated"
     truncated["certHash"] = hashlib.sha256(_cert_preimage(truncated)).hexdigest()
     (HERE / "certificate-truncated.json").write_text(
-        canonical_json(truncated).decode("utf-8"), encoding="utf-8")
+        canonical_json(truncated).decode("utf-8"), encoding="utf-8", newline="\r\n")
 
     print(f"wrote {len(entries)} ledger entries")
     print("certificate.json            certHash", honest["certHash"][:16])
