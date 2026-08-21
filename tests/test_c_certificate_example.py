@@ -7,6 +7,7 @@ the exact strings quoted in docs/verify-certificate.md are asserted here.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,15 @@ from deadman.verify_certificate import (
 
 ROOT = Path(__file__).resolve().parents[1]
 EX = ROOT / "examples" / "certificate"
+
+
+def _subprocess_env():
+    """`python path/to/script.py` puts the SCRIPT's directory on sys.path, not the cwd, so a
+    subprocess cannot import `deadman` from a plain checkout. Locally an editable install hides
+    that; CI, which installs nothing but pytest, does not. Set the path explicitly."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    return env
 
 
 def _entries():
@@ -83,7 +93,7 @@ def test_the_documented_exit_codes_are_what_the_cli_returns(tmp_path):
     def run(cert):
         return subprocess.run(
             [sys.executable, "-m", "deadman.verify_certificate", str(cert), str(EX / "ledger.jsonl")],
-            capture_output=True, text=True, cwd=str(ROOT))
+            capture_output=True, text=True, cwd=str(ROOT), env=_subprocess_env())
 
     ok = run(EX / "certificate.json")
     assert ok.returncode == EXIT_OK
@@ -108,7 +118,7 @@ def test_the_generator_reproduces_the_checked_in_files(tmp_path):
               for n in ("ledger.jsonl", "certificate.json", "certificate-tampered.json",
                         "certificate-truncated.json")}
     r = subprocess.run([sys.executable, str(EX / "make_example.py")],
-                       capture_output=True, text=True, cwd=str(ROOT))
+                       capture_output=True, text=True, cwd=str(ROOT), env=_subprocess_env())
     assert r.returncode == 0, r.stderr
     for name, original in before.items():
         assert (EX / name).read_bytes() == original, f"{name} is not reproducible from the script"

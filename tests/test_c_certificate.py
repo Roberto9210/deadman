@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -657,11 +658,14 @@ def test_c18_the_cli_returns_those_codes(tmp_path):
     junk = tmp_path / "junk.json"
     junk.write_text("{not json", encoding="utf-8")
 
+    root = Path(__file__).resolve().parents[1]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(root) + os.pathsep + env.get("PYTHONPATH", "")
+
     def run(cert):
         return subprocess.run([sys.executable, "-m", "deadman.verify_certificate",
                                str(cert), str(ledger)],
-                              capture_output=True, text=True,
-                              cwd=str(Path(__file__).resolve().parents[1]))
+                              capture_output=True, text=True, cwd=str(root), env=env)
 
     ok = run(honest)
     assert ok.returncode == EXIT_OK, ok.stdout + ok.stderr

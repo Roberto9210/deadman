@@ -30,7 +30,10 @@ jobs:
         # suite would report 4 skips instead of the 1 documented platform skip. Installed so
         # the signature path is genuinely exercised on every OS and Python in the matrix.
         run: python -m pip install --upgrade pip pytest cryptography
-      - name: Full suite (the single skip must be visible with its reason)
+      - name: Full suite (every skip must be visible with its reason)
+        # -rs prints the reasons. Two are expected here: the design skip in G5, and the
+        # certificate case that runs only where a live guardian ledger exists - that file is a
+        # trader's session data and is deliberately not vendored into a public repository.
         run: python -m pytest -q -rs tests
 
   wheel:
