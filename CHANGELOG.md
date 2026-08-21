@@ -3,11 +3,56 @@
 Release process (every version): a release is cut ONLY from a git tag `vX.Y.Z` that must equal
 `project.version` in `pyproject.toml` (the release workflow fails loudly on a mismatch, before building).
 The tag runs the **same suite as CI** (`.github/workflows/deadman.yml` reused via `workflow_call`:
-ubuntu/windows/macos × Python 3.10/3.12/3.14, real-process tests unmarked, the single platform skip
-visible), then builds sdist + wheel with `python -m build`, installs the wheel into a clean venv with
+ubuntu/windows/macos × Python 3.10/3.12/3.14, real-process tests unmarked, every skip
+visible with its reason), then builds sdist + wheel with `python -m build`, installs the wheel into a clean venv with
 `--no-deps` from a neutral cwd and runs a smoke flow asserting zero non-stdlib modules loaded, and only
 then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
 `release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`.
+
+## 0.2.0 — 2026-08-21
+
+Adds a **verifiable session certificate verifier**: the part a third party runs to *disprove* a
+claim that a trader operated under a self-imposed daily loss limit. Nothing existing changed
+behaviour; 0.1.0 code is untouched.
+
+- **`deadman.verify_certificate`** — a pure function `verify_certificate(cert, entries, anchors,
+  pubkey) -> CertReport`, plus `python -m deadman.verify_certificate certificate.json ledger.jsonl`.
+  It **ignores what the certificate asserts and recomputes every claim from the ledger events**;
+  a signature proves origin, not truth, so nothing here trusts one. Reports the trust layer it
+  actually **reached** (L1 chain / L2 external anchor / L3 signature), and prints an explicit list
+  of what it could **not** verify — on success too, because a verifier that can only say OK is a
+  rubber stamp.
+- **Exit codes `0` verified / `1` contradicted / `2` could not evaluate**, kept apart on purpose:
+  "I caught you lying" and "I could not look" are different facts, and a tool that collapses them
+  can be disabled by handing it a broken file.
+- **Two ledger dialects**, `guardian-core-v1` and `deadman-kit-v1`, **declared by the certificate
+  and enforced**. Sniffing the shape would let a forger supply a ledger built in whichever schema
+  suits the lie.
+- **Series checks**: links between days, a day removed from the middle, undeclared gaps, gaps
+  without a reason, a day certified twice, a certificate naming itself as its own predecessor.
+- **Adversarial suite**: 18 named guarantees (C1–C18) and 13 attacks invented afterwards, plus
+  mutation control that sabotages the verifier eleven ways and requires the suite to go red for
+  each. 65 cases in total; 230 in the package.
+- **`examples/certificate/`** — a runnable worked example: one ledger and three certificates over
+  it (honest, falsified, truncated), regenerable by `make_example.py` and verified on every test
+  run so the documentation cannot drift from the tool.
+- **Optional extra `verify-sig`** (`pip install deadman-kit[verify-sig]`) for Ed25519 signature
+  checking. **The base package keeps zero runtime dependencies**: extras are opt-in and the
+  verifier reaches cryptography through `importlib`, so the stdlib-only import scan still passes.
+  Without the extra the signature reports `NOT_VERIFIED` and degrades to L2 — never to "valid".
+- **`docs/verify-certificate.md`** — written for the reader who wants to contradict us, including
+  **the attack this verifier was wrong about**: claims are recomputed over the range the
+  certificate *declares*, so a certificate truncated one entry before a breach verified clean at
+  L1 with `limitRespected: true` and every recomputed number agreeing, because the arithmetic was
+  honest over a window chosen to exclude the truth. Recomputing catches a dishonest *answer*; that
+  was a dishonest *question*. Closed by checking the declared range against the session's own
+  `DAY_OPENED`/`DAY_CLOSED`, and calibrated by harm rather than shape so an honest mid-session
+  export is reported as incomplete, not as a lie.
+
+Known limits, stated rather than implied: L1 alone does not survive an attacker with disk access
+and says so on every run; L3 proves the local emitter's origin, never that our software produced
+the document; and `tradesObserved` is not recomputable from the current event vocabulary, so it is
+not judged.
 
 ## 0.1.0 — 2026-08-18
 
