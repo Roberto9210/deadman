@@ -184,7 +184,7 @@ the part a third party runs to **disprove** such a claim, which is the only reas
 anything:
 
 ```bash
-git clone https://github.com/Roberto9210/deadman.git && cd deadman   # not on PyPI yet: 0.1.0 predates it
+pip install deadman-kit        # 0.2.0 or newer
 python -m deadman.verify_certificate certificate.json ledger.jsonl
 ```
 
