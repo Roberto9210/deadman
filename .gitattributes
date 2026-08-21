@@ -1,0 +1,3 @@
+# Every blob in this repo is CRLF; `* -text` stops git converting endings, so an edit that keeps them
+# no longer rewrites the file and moves its blame. Not normalising is deliberate: that commit would.
+* -text
