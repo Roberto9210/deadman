@@ -159,11 +159,22 @@ ASSERTED_BLOCKS = ("issuer", "subject", "commitment", "session")
 HEX16 = re.compile(r"^[0-9a-f]{16}$")
 
 
-def _readme_table_fields() -> set:
-    """Field paths named in the first column of the README's fabrication table."""
+#: The heading the fabrication table lives under. The README also holds a "one lesson per file"
+#: table whose first column is filenames, and parsing both reported every filename as a field.
+FABRICATION_HEADING = "## What is fabricated, and how you recognise it"
+
+
+def _fabrication_rows() -> list:
+    """(field path, value cell) for every row of the fabrication table, and no other table."""
     text = (EX / "README.md").read_text(encoding="utf-8")
-    fields = set()
-    for line in text.splitlines():
+    assert FABRICATION_HEADING in text, (
+        f"the README no longer has a {FABRICATION_HEADING!r} section; these tests read it")
+
+    section = text.split(FABRICATION_HEADING, 1)[1]
+    section = re.split(r"^## ", section, maxsplit=1, flags=re.MULTILINE)[0]
+
+    rows = []
+    for line in section.splitlines():
         if not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
@@ -171,8 +182,13 @@ def _readme_table_fields() -> set:
             continue
         head = cells[0]
         if head.startswith("`") and head.endswith("`"):
-            fields.add(head.strip("`"))
-    return fields
+            rows.append((head.strip("`"), cells[1]))
+    assert rows, "the fabrication table has no rows"
+    return rows
+
+
+def _readme_table_fields() -> set:
+    return {field for field, _ in _fabrication_rows()}
 
 
 def _fields_the_examples_assert() -> set:
@@ -205,24 +221,78 @@ def test_the_readme_table_documents_every_fabricated_field():
         + "\n  ".join(missing))
 
 
-def test_every_hash_quoted_in_the_readme_really_occurs_in_an_example():
-    """Written after quoting an account hash from memory instead of reading it. A table of tells
-    that contains an invented value is a worse lie than the one it documents."""
-    text = (EX / "README.md").read_text(encoding="utf-8")
-    quoted = {tok for tok in re.findall(r"`([0-9a-f]{16})`", text)}
+def _values_at(node, path: str) -> list:
+    """Every value reachable by a dotted path, descending through lists."""
+    current = [node]
+    for part in path.split("."):
+        nxt = []
+        for item in current:
+            if isinstance(item, list):
+                item = {k: v for d in item if isinstance(d, dict) for k, v in d.items()}
+            if isinstance(item, dict) and part in item:
+                nxt.append(item[part])
+        current = nxt
+        if not current:
+            return []
+    out = []
+    for item in current:
+        out.extend(item if isinstance(item, list) else [item])
+    return out
 
-    # Whole values AND prefixes: the table legitimately quotes the first 16 characters of
-    # commitment.sealHash and says "+ 48 zeros", so requiring an exact match would forbid
-    # documenting a prefix - which is the clearest way to describe a padded value.
-    present = set()
-    for _, cert in _certificates():
-        for _, value in _walk(cert):
-            if isinstance(value, str):
-                present.add(value)
-    invented = sorted(tok for tok in quoted
-                      if not any(v == tok or v.startswith(tok) for v in present))
-    assert not invented, (
-        "the README quotes hashes that appear in no example file: " + ", ".join(invented))
+
+def _path_exists(cert, path: str) -> bool:
+    node = cert
+    for part in path.split("."):
+        if isinstance(node, list):
+            node = {k: v for d in node if isinstance(d, dict) for k, v in d.items()}
+        if not isinstance(node, dict) or part not in node:
+            return False
+        node = node[part]
+    return True
+
+
+def test_every_hash_quoted_in_a_row_belongs_to_that_rows_own_field():
+    """Attribution, not just existence.
+
+    The weak version of this test asked whether a quoted hash appeared ANYWHERE in the example
+    set. That passes a table which says `subject.accounts` = X where X is really some other
+    field's value: every hash exists, every row is wrong. A reader trusts rows, not sets.
+
+    A quoted token matches when it equals a value at that row's own path, or prefixes one - the
+    table legitimately quotes the first 16 characters of a padded sealHash.
+    """
+    certificates = _certificates()
+    offences = []
+    for field, cell in _fabrication_rows():
+        for token in re.findall(r"`([0-9a-f]{16})`", cell):
+            found_here = any(
+                isinstance(v, str) and (v == token or v.startswith(token))
+                for _, cert in certificates
+                for v in _values_at(cert, field))
+            if found_here:
+                continue
+            elsewhere = sorted({
+                other for _, cert in certificates
+                for other, v in _walk(cert)
+                if isinstance(v, str) and (v == token or v.startswith(token))})
+            offences.append(
+                f"{field}: the table quotes {token}, which is not a value of that field"
+                + (f" - it belongs to {', '.join(elsewhere)}" if elsewhere
+                   else " and appears nowhere in the examples"))
+    assert not offences, "the fabrication table misattributes a value:\n  " + "\n  ".join(offences)
+
+
+def test_the_readme_table_has_no_stale_rows():
+    """The mirror of the coverage test. If a field disappears from the examples, its row keeps
+    describing something a reader will look for and not find - documentation that has quietly
+    become fiction, which is the same failure as an undocumented field wearing the other face.
+    """
+    certificates = _certificates()
+    stale = [field for field, _ in _fabrication_rows()
+             if not any(_path_exists(cert, field) for _, cert in certificates)]
+    assert not stale, (
+        "the fabrication table has rows for fields no example carries any more:\n  "
+        + "\n  ".join(sorted(stale)))
 
 
 def test_the_documented_build_hash_preimage_actually_produces_it():
