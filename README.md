@@ -124,6 +124,54 @@ print(ledger.verify())                              # the ledger alone explains 
 `my_broker_port` is your adapter implementing `BrokerPort` (five methods). `my_publisher` is your anchor
 publisher. Neither is provided: the library does not talk to the network.
 
+## Using with freqtrade
+
+If your bot is a [freqtrade](https://www.freqtrade.io) strategy, you do not write a `BrokerPort`:
+freqtrade already owns the order. deadman goes in as a **gate plus a ledger**, through five callbacks
+freqtrade already calls — in live, in dry-run and in backtesting alike.
+
+```python
+class MyStrategy(DeadmanGuardMixin, IStrategy):     # examples/freqtrade/deadman_freqtrade.py
+    def deadman_build_gate(self) -> DeadmanGate:
+        return DeadmanGate(
+            "/var/lib/mybot/deadman",
+            limits=Limits(max_trades_per_day=20, max_daily_loss_usd=50.0, worst_case_fee_bps=80.0),
+            allowed_pairs=self.config["exchange"]["pair_whitelist"],
+            quotes=TickerQuotes(self.dp),            # live/dry-run: real ticker, measured latency
+            max_latency_ms=2000.0, max_spread_bps=50.0, min_notional_usd=10.0,
+        )
+```
+
+`confirm_trade_entry` runs the full chain — kill switch, entry halt, units, daily limits, order sanity
+— and `False` cancels the entry. `confirm_trade_exit` runs the **kill switch only**: an exhausted
+limit, an active halt, an unreadable stats file or a crash inside deadman must never hold a position,
+and `confirm_trade_exit` is the hook that would otherwise suppress a stop-loss exit. `order_filled`
+records the fill with its fee and the round trip's **gross** P&L — freqtrade's own profit figures
+already include fees, so handing them to `record_pnl` would count fees twice.
+
+One thing worth knowing before you wire it: freqtrade calls the confirm callbacks through
+`strategy_safe_wrapper(..., default_retval=True)`, so a strategy whose risk check *raises* does not
+stop the trade — it places it. The mixin therefore catches its own exceptions and answers `False` on
+an entry, `True` on an exit.
+
+What this does **not** give you: `BrokerPort` and `HonestExecutor` are not used (freqtrade owns
+placement, polling, timeout, cancel and startup reconciliation), and the gate never sees position
+adjustments, liquidations, partial exits or stoploss-on-exchange orders — their fills are ledgered,
+not gated. Shorts and futures are refused rather than guessed. The complete list, with the freqtrade
+line that proves each one, is
+[**What this integration does NOT cover**](examples/freqtrade/README.md#what-this-integration-does-not-cover)
+— including what was never verified: the backtest was run, `freqtrade trade --dry-run` was not.
+
+**[`examples/freqtrade/`](examples/freqtrade/)** has the whole thing: the wrapper, a demo strategy, 28
+tests that need neither freqtrade nor an exchange, and `demo.py` — three real `freqtrade backtesting`
+runs proving the sentinel stops entries, the daily limit blocks, the ledger records and `verify()`
+passes, plus a fourth check where an edited ledger is rejected with `HASH_MISMATCH`. Every claim there
+carries the file and line in freqtrade that backs it (verified against freqtrade 2026.7 on Python
+3.14.2). Those 28 tests and the demo are a **local suite, run by hand**: CI below does not run them —
+freqtrade drags in numpy, pandas, scipy, pyarrow, ccxt and TA-Lib, which is too heavy for a
+3-OS × 3-Python matrix, and the demo needs network access. A freqtrade release can therefore break the
+example without turning the badge red.
+
 ## Install and test
 
 ```bash

@@ -1,0 +1,69 @@
+{
+    "$comment": "freqtrade config for the deadman demo. dry_run only, no API keys, no orders. demo.py copies this file per scenario and overrides deadman.state_dir and the limit under test.",
+    "max_open_trades": 1,
+    "stake_currency": "USDT",
+    "stake_amount": 100,
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    "timeframe": "5m",
+    "trading_mode": "spot",
+    "margin_mode": "",
+    "fee": 0.001,
+    "dataformat_ohlcv": "json",
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 10,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "same",
+        "use_order_book": false,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "same",
+        "use_order_book": false,
+        "order_book_top": 1
+    },
+    "exchange": {
+        "name": "kraken",
+        "key": "",
+        "secret": "",
+        "ccxt_config": {},
+        "ccxt_async_config": {},
+        "pair_whitelist": [
+            "BTC/USDT"
+        ],
+        "pair_blacklist": []
+    },
+    "pairlists": [
+        {
+            "method": "StaticPairList"
+        }
+    ],
+    "internals": {
+        "process_throttle_secs": 5
+    },
+    "deadman": {
+        "$comment": "Every key below must be present. null means 'declared, not enforced'; absent means nobody decided, and the strategy refuses to start naming the key.",
+        "state_dir": "OVERRIDDEN_BY_demo.py",
+        "quotes": "declared_spread",
+        "declared_spread_bps": 4.0,
+        "declared_latency_ms": 25.0,
+        "max_trades_per_day": 20,
+        "max_daily_loss_usd": 50.0,
+        "max_notional_usd_per_order": 250.0,
+        "worst_case_fee_bps": 80.0,
+        "max_latency_ms": 2000.0,
+        "max_spread_bps": 50.0,
+        "min_notional_usd": 10.0,
+        "exit_sanity": false
+    }
+}
