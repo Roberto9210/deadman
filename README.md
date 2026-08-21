@@ -182,7 +182,7 @@ the part a third party runs to **disprove** such a claim, which is the only reas
 anything:
 
 ```bash
-pip install deadman-kit
+git clone https://github.com/Roberto9210/deadman.git && cd deadman   # not on PyPI yet: 0.1.0 predates it
 python -m deadman.verify_certificate certificate.json ledger.jsonl
 ```
 

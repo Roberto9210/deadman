@@ -2,8 +2,11 @@
 
 Run it without knowing anything about this project:
 
-    pip install deadman-kit
+    git clone https://github.com/Roberto9210/deadman.git && cd deadman
     python -m deadman.verify_certificate certificate.json ledger.jsonl
+
+(`pip install deadman-kit` gets you 0.1.0, which predates this module. Clone until a release
+is cut; after that the pip line is the whole install.)
 
 It answers one question: **does this certificate survive its own evidence?**
 

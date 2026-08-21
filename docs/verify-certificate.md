@@ -8,12 +8,18 @@ nothing, so the tool that judges it is public, runs on your machine, needs nothi
 prints what it could *not* establish even when everything passes.
 
 ```bash
-pip install deadman-kit
+git clone https://github.com/Roberto9210/deadman.git && cd deadman
 python -m deadman.verify_certificate certificate.json ledger.jsonl
 ```
 
 Two files, one command. No account, no key, no network, no sign-up. The verifier has **zero
 runtime dependencies** and opens no socket.
+
+> **Not on PyPI yet.** The published `deadman-kit` package is 0.1.0, which predates this
+> verifier, so `pip install deadman-kit` does **not** get you the module today — clone the
+> repository instead. When a release is cut, `pip install deadman-kit` becomes the one-line
+> install and this note goes away. Checked rather than assumed: installing 0.1.0 into a clean
+> virtualenv and running the command gives `No module named deadman.verify_certificate`.
 
 ---
 
@@ -152,7 +158,7 @@ Signature checking needs an optional extra, and without it the verifier reports
 `NOT_VERIFIED (extra not installed)` and degrades to L2 — never to "valid":
 
 ```bash
-pip install deadman-kit[verify-sig]
+pip install cryptography          # from a clone; or deadman-kit[verify-sig] once released
 python -m deadman.verify_certificate certificate.json ledger.jsonl --pubkey issuer.pem
 ```
 
