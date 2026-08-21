@@ -224,6 +224,18 @@ def test_c3_a_removed_line_is_caught_as_an_incomplete_range():
     assert {"RANGE_INCOMPLETE", "CHAIN_BROKEN"} & codes(rep)
 
 
+def test_c1_a_ledger_that_kept_growing_after_emission_still_verifies():
+    """The real case: the guardian is still running while the trader exports. A certificate
+    covers a RANGE, so entries appended afterwards are outside it and must not invalidate it -
+    while a range with a hole in it still must."""
+    entries = gledger(QUIET_DAY)
+    cert = make_cert(entries)                       # declares 1..7
+    kept_running = entries + gledger(QUIET_DAY + QUIET_DAY)[7:]
+    rep = verify_certificate(cert, kept_running)
+    assert rep.range_to == 7 and rep.entries_read > 7
+    assert rep.ok, [str(f) for f in rep.contradictions]
+
+
 # ================================================================== C4
 
 def test_c4_without_an_anchor_it_declares_l1_and_says_why():
