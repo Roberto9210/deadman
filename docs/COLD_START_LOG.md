@@ -219,3 +219,78 @@ Its own first draft passed while reading **zero characters**: METADATA uses CRLF
 split on a bare blank line. A gate that passes because it measured nothing is worse than no gate,
 since it also hands out confidence. It now parses METADATA as the RFC 822 document it is and
 refuses to run at all below 500 characters.
+
+---
+
+# Run 3 - 2026-08-22 (deadman-kit 0.2.2)
+
+Purpose: 0.2.2 exists only to stop the project promising a trust layer nobody has reached. A cold
+start is the only way to check that, because every claim it fixes lives on a page a stranger reads
+before installing.
+
+## A discarded first attempt, and a NEW failure mode
+
+The first attempt is void. `pip install --no-cache-dir deadman-kit` resolved **0.2.1**, minutes
+after 0.2.2 was live on the simple index.
+
+**This is not the Run 2 defect.** Run 2 was pip's local HTTP cache, and `--no-cache-dir` is the fix
+for that. Here `--no-cache-dir` was passed and it still happened: the index view pip fetched was
+stale, and a flag that clears a *local* cache cannot clear that. Minutes later `pip index versions`
+reported `LATEST: 0.2.2` and resolved it without complaint.
+
+The lesson is one line, and it generalises past pip: **no flag makes a remote answer fresh. The
+only reliable check is to assert the version AFTER installing, and discard the run when it is
+wrong.** A flag that is believed to guarantee freshness is worse than no flag, because the run
+proceeds with confidence it has not earned - the same defect this release was cut to fix, met while
+verifying the fix.
+
+## Confirming publication - two paths, never the bare `/json`
+
+| path | reports |
+|---|---|
+| `pypi.org/simple/deadman-kit/` (what pip resolves) | `0.1.0, 0.2.0, 0.2.1, 0.2.2`, both wheel and sdist |
+| `pypi.org/pypi/deadman-kit/0.2.2/json` (per version) | `0.2.2`, with the corrected Summary |
+| ~~`pypi.org/pypi/deadman-kit/json`~~ (cached) | still said **0.2.1**, with the OLD Summary |
+
+The bare `/json` endpoint was wrong again, and was again not consulted for the verdict.
+
+## Environment honesty check
+
+    installed version      : 0.2.2
+    package resolves to    : ...\coldstart3\v\Lib\site-packages\deadman\__init__.py
+    inside this fresh venv : True
+    NOT from the repo tree : True
+    repo absent from path  : True
+
+Install: **3 seconds**, zero dependencies.
+
+## What 0.2.2 was cut to fix, checked on the published artefacts
+
+**1. The Summary no longer states an optional capability as present.**
+
+    Execution-safety primitives ... hash-chained ledger anchorable to a third party
+    by a publisher you supply. Zero runtime dependencies.
+
+`"externally anchored" in summary: False`. Read aloud with anchoring off, the new sentence is still
+true and still says something - it names who has to supply the missing piece.
+
+**2. A reader who installs and runs `--example` learns L2 exists and what reaches it.** Against a
+whole run of 0.2.1, which contained the strings `L2`, `L3` and `--anchors` exactly zero times:
+
+    - NO_EXTERNAL_ANCHOR: ... a full rewrite with recomputed hashes passes L1. TO REACH L2, ask
+      whoever holds this ledger for anchors kept by a third party and pass them with --anchors
+
+    RESULT: VERIFIED at L1, THE FLOOR LAYER (exit 0).
+
+Both the layer and the flag are **inside the finding**, not in a footer the reader has already
+scrolled past. The headline can no longer be quoted as a grade.
+
+**3. The missing sentence is on the page, above the snippet.** *"Without a publisher there is no
+anchor, and everything stays at L1"* appears twice in the published description, at lines 33 and
+136, and the `Ledger(...)` a reader copies is at line 113 - so the first occurrence is read before
+anything is built. The snippet itself now shows both constructions with the consequence beside
+each.
+
+## Friction
+
+One, and it is the discarded attempt above. Nothing was fixed during the run.

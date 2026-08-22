@@ -19,6 +19,17 @@ reading only the description. What follows is the part a person still has to do.
 
 ---
 
+## After publishing
+
+- [ ] Confirm the version by **two** paths and never by the bare `/json` endpoint, which has now
+      served a stale answer on three separate releases: `pypi.org/simple/deadman-kit/` (what pip
+      actually resolves against) and `pypi.org/pypi/deadman-kit/<version>/json`.
+- [ ] In the cold-start venv, **assert the installed version after installing**. `--no-cache-dir`
+      clears a *local* cache and does nothing about a stale index response: run 3 passed the flag
+      and still got the previous version, minutes after the new one was live. No flag makes a
+      remote answer fresh, so the check has to be on the result. If it is wrong, discard the run
+      rather than reinstalling into it.
+
 ## Before tagging
 
 - [ ] `pyproject.toml` version and `deadman/__init__.py` `__version__` agree.
