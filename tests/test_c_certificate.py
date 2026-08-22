@@ -714,3 +714,51 @@ def test_the_verifier_can_actually_refuse():
         assert rep.exit_code == EXIT_CONTRADICTED, name
         if name == "trust":
             assert rep.reached_level == "L1" and rep.declared_level == "L3"
+
+
+# ------------------------------------------------- the reachable layer is named, 0.2.2
+# Audit finding behind these: a whole run never contained the strings "L2", "L3" or
+# "--anchors". The tool told the reader that L1 does not survive disk access and left them
+# with no way to know a better layer existed, let alone how to get there. Naming a limit
+# without naming its remedy is half a disclosure.
+
+def test_a_run_that_lands_on_L1_names_the_layer_above_it_and_how_to_reach_it():
+    entries = gledger(QUIET_DAY)
+    out = verify_certificate(make_cert(entries), entries).render()
+
+    assert "REACHED       L1" in out
+    assert "L2" in out, "a reader at L1 is never told a better layer exists"
+    assert "--anchors" in out, "and is never told what would take them there"
+    # The remedy belongs beside the limitation, not in a footer the reader has left behind.
+    anchor_block = next(l for l in out.splitlines() if "NO_EXTERNAL_ANCHOR" in l)
+    assert "L2" in anchor_block and "--anchors" in anchor_block
+
+
+def test_L1_is_marked_as_the_floor_and_a_higher_layer_is_not():
+    """`VERIFIED` is the line that gets quoted. At L1 it must not read as a grade."""
+    entries = gledger(QUIET_DAY)
+
+    at_l1 = verify_certificate(make_cert(entries), entries)
+    assert at_l1.reached_level == "L1"
+    assert "RESULT: VERIFIED at L1, THE FLOOR LAYER (exit 0)." in at_l1.render()
+
+    anchor = [{"seq": 7, "hash": entries[6]["hash"], "type": "tsa",
+               "ref": "held-by-third-party", "tsUtc": TS % 30}]
+    at_l2 = verify_certificate(make_cert(entries, trust="L2", anchors=anchor), entries,
+                               anchors=anchor)
+    assert at_l2.reached_level == "L2"
+    out = at_l2.render()
+    assert "RESULT: VERIFIED at L2 (exit 0)." in out
+    assert "FLOOR" not in out, "the floor marker must not follow a layer that is not the floor"
+
+
+def test_the_anchored_run_stops_advertising_the_remedy_it_no_longer_needs():
+    """Control for the test above: the --anchors advice is tied to the anchor being ABSENT,
+    not printed unconditionally, or it would be noise on every successful L2 run."""
+    entries = gledger(QUIET_DAY)
+    anchor = [{"seq": 7, "hash": entries[6]["hash"], "type": "tsa",
+               "ref": "held-by-third-party", "tsUtc": TS % 30}]
+    out = verify_certificate(make_cert(entries, trust="L2", anchors=anchor), entries,
+                             anchors=anchor).render()
+    assert "NO_EXTERNAL_ANCHOR" not in out
+    assert "--anchors" not in out

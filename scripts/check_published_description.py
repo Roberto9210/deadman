@@ -50,6 +50,30 @@ STALE_CLAIMS = [
     "clone until",
 ]
 
+#: Present-tense capability claims about something that is OFF unless the user wires it up.
+#:
+#: 0.2.1 shipped the Summary "hash-chained and externally anchored ledger". The library anchors
+#: nothing by default - `publisher=None`, and `_maybe_anchor` returns immediately - so on every
+#: install that phrase described a ledger that was anchored exactly never. It reads identically
+#: whether anchoring is on or off, which is the rule-5 test failing: a phrase that does not
+#: distinguish anything is not evidence, it is decoration, and decoration in a Summary is the
+#: most-read and least-qualified string the project publishes.
+#:
+#: Blunt on purpose, exactly like STALE_CLAIMS, and it WILL fire on prose that legitimately
+#: discusses one of these phrases while explaining the defect. Reword the sentence. Never teach
+#: this list to tell an assertion from a discussion of one: a gate that can be argued with has
+#: stopped being a gate.
+OPTIONAL_AS_PRESENT = [
+    "externally anchored",
+    "anchored ledger",
+    "is anchored",
+    "are anchored",
+    "tamper-proof",
+    "tamper proof",
+    "tamper-evident",
+    "tamper evident",
+]
+
 #: A published description is read on PyPI, where a relative link resolves to nothing useful.
 #: Anchors and mail links are fine.
 RELATIVE_LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)]+)\)")
@@ -65,11 +89,15 @@ CLONE_AS_INSTALL = re.compile(r"git clone[^\n]*\n[^\n]*python -m deadman", re.IG
 MIN_PLAUSIBLE_DESCRIPTION = 500
 
 
-def description_of(dist: Path) -> str:
-    """The long description exactly as the index will render it.
+def published_text(dist: Path) -> tuple:
+    """Both frozen strings: the one-line Summary and the long description.
 
     METADATA is an RFC 822 document, so it is parsed as one rather than split by hand: the payload
     is the description, whatever line endings the builder happened to use.
+
+    The Summary used to be skipped entirely, which is how "externally anchored ledger" reached
+    PyPI through a gate that ran and passed. It is the shortest string on the page and the only
+    one that appears in search results, so it is now checked first.
     """
     if dist.suffix != ".whl":
         raise SystemExit(f"expected a .whl, got {dist}")
@@ -79,6 +107,9 @@ def description_of(dist: Path) -> str:
         raw = z.read(name).decode("utf-8")
 
     msg = message_from_string(raw)
+    summary = (msg.get("Summary", "") or "").strip()
+    if not summary:
+        raise SystemExit(f"REFUSING TO RELEASE - {dist.name} has no Summary header to check.")
     body = msg.get_payload()
     if not body:                       # very old metadata folds it into a header instead
         body = msg.get("Description", "") or ""
@@ -88,18 +119,28 @@ def description_of(dist: Path) -> str:
             f"REFUSING TO RELEASE - extracted only {len(body)} characters of description from "
             f"{dist.name}. Either the package genuinely has no README, or this script failed to "
             f"read it. Both mean the checks below would be meaningless, so they do not run.")
-    return body
+    return summary, body
 
 
-def check(text: str) -> list:
+def check(text: str, where: str = "description") -> list:
     offences = []
     low = text.lower()
+
+    for claim in OPTIONAL_AS_PRESENT:
+        if claim in low:
+            line = next((l.strip() for l in text.splitlines() if claim in l.lower()), "")
+            offences.append(
+                f"OPTIONAL CAPABILITY STATED AS PRESENT: {claim!r} in the {where}.\n"
+                f"      {line[:160]}\n"
+                f"      This names something the user must switch on as though it were "
+                f"already true. Say what it takes - who supplies it, and what the package "
+                f"does without it - or drop the phrase.")
 
     for claim in STALE_CLAIMS:
         if claim in low:
             line = next((l.strip() for l in text.splitlines() if claim in l.lower()), "")
             offences.append(
-                f"STALE CLAIM {claim!r} in the description about to be published.\n"
+                f"STALE CLAIM {claim!r} in the {where} about to be published.\n"
                 f"      {line[:120]}\n"
                 f"      A PyPI page cannot be edited afterwards. Fix the README and rebuild.")
 
@@ -127,12 +168,15 @@ def main(argv: list) -> int:
         print(f"no such distribution: {dist}", file=sys.stderr)
         return 2
 
-    text = description_of(dist)
+    summary, text = published_text(dist)
+    print(f"checking the published Summary of {dist.name} ({len(summary)} chars)")
+    print(f"  {summary}")
     print(f"checking the published description of {dist.name} ({len(text)} chars)")
 
-    offences = check(text)
+    offences = check(summary, "Summary") + check(text, "description")
     if not offences:
-        print("clean: no stale claims, no relative links, no clone-as-install.")
+        print("clean: no optional capability stated as present, no stale claims, no "
+              "relative links, no clone-as-install.")
         return 0
 
     print()

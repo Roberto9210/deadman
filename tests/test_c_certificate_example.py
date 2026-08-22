@@ -167,7 +167,7 @@ def test_the_documented_exit_codes_are_what_the_cli_returns(tmp_path):
 
     ok = run(EX / "certificate.json")
     assert ok.returncode == EXIT_OK
-    assert "RESULT: VERIFIED at L1 (exit 0)." in ok.stdout
+    assert "RESULT: VERIFIED at L1, THE FLOOR LAYER (exit 0)." in ok.stdout
     assert "COULD NOT VERIFY" in ok.stdout, "the limits are printed even on success"
 
     bad = run(EX / "certificate-tampered.json")
@@ -214,7 +214,7 @@ def test_the_example_flag_works_with_no_files_and_no_network(tmp_path):
         capture_output=True, text=True, cwd=str(tmp_path), env=_subprocess_env())
 
     assert r.returncode == EXIT_OK, r.stdout + r.stderr
-    assert "RESULT: VERIFIED at L1 (exit 0)." in r.stdout
+    assert "RESULT: VERIFIED at L1, THE FLOOR LAYER (exit 0)." in r.stdout
     assert "runs entirely offline" in r.stdout
     # It must hand the reader somewhere to go next, with a URL that works off pypi.org.
     assert "https://github.com/Roberto9210/deadman/tree/main/deadman/examples/certificate" in r.stdout

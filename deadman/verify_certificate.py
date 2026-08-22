@@ -482,7 +482,10 @@ class CertReport:
         if self.contradictions:
             add(f"RESULT: CONTRADICTED (exit 1). {len(self.contradictions)} finding(s).")
         else:
-            add(f"RESULT: VERIFIED at {self.reached_level} (exit 0).")
+            # L1 is where a run lands when nothing external was supplied, so the headline
+            # must not read as a grade. One word, because the format is quoted elsewhere.
+            floor = ", THE FLOOR LAYER" if self.reached_level == "L1" else ""
+            add(f"RESULT: VERIFIED at {self.reached_level}{floor} (exit 0).")
         return "\n".join(L)
 
 
@@ -1260,7 +1263,9 @@ def verify_certificate(cert: Mapping[str, Any],
     if rep.anchors_checked == 0:
         rep.cannot_verify("NO_EXTERNAL_ANCHOR",
                           "no third-party anchor was supplied, so nothing proves this ledger "
-                          "existed before now: a full rewrite with recomputed hashes passes L1")
+                          "existed before now: a full rewrite with recomputed hashes passes L1. "
+                          "TO REACH L2, ask whoever holds this ledger for anchors kept by a third "
+                          "party and pass them with --anchors")
     elif rep.covered_up_to_seq is not None and rep.covered_up_to_seq < to_seq:
         rep.cannot_verify("ANCHOR_COVERAGE_PARTIAL",
                           f"anchors cover up to seq {rep.covered_up_to_seq}; entries "

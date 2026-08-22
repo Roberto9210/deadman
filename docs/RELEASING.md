@@ -11,8 +11,11 @@ Automated gates already cover the mechanical part: the tag must match `project.v
 suite runs on nine OS/Python combinations, the wheel is installed into a clean virtualenv with
 `--no-deps` from a neutral working directory, and
 [`scripts/check_published_description.py`](https://github.com/Roberto9210/deadman/blob/main/scripts/check_published_description.py)
-refuses to publish a description containing stale claims or relative markdown links. What follows
-is the part a person still has to do.
+refuses to publish a description containing stale claims, relative markdown links, or a
+present-tense claim about a capability that is off by default. It checks **both** frozen
+strings - the one-line Summary and the long description - because 0.2.1 shipped
+"externally anchored ledger" in the Summary through a gate that ran and passed while
+reading only the description. What follows is the part a person still has to do.
 
 ---
 
@@ -27,9 +30,13 @@ is the part a person still has to do.
       python scripts/check_published_description.py dist/deadman_kit-<version>-py3-none-any.whl
 
   The gate reads the wheel's own metadata, so it sees what PyPI will render — not the working
-  tree. It exits non-zero on stale claims and relative links, and refuses to run at all if it
-  extracts fewer than 500 characters, because a gate that passes on nothing also hands out
-  confidence.
+  tree. It exits non-zero on stale claims, relative links, and optional capabilities stated
+  as present, and refuses to run at all if it extracts fewer than 500 characters or finds no
+  Summary, because a gate that passes on nothing also hands out confidence.
+
+- [ ] Read the Summary out loud with the feature **off**. If the sentence is still true, it
+      is not describing anything. That is the whole test behind `OPTIONAL_AS_PRESENT`, and
+      the blacklist only catches the phrases we already got wrong once.
 
 ## After publishing — verifying it landed
 

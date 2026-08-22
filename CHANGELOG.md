@@ -9,6 +9,46 @@ visible with its reason), then builds sdist + wheel with `python -m build`, inst
 then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
 `release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`. The human half - what to check before tagging, and how to confirm a release really landed without being fooled by PyPI's cached `/json` endpoint or pip's cached index - is in [`docs/RELEASING.md`](https://github.com/Roberto9210/deadman/blob/main/docs/RELEASING.md).
 
+## 0.2.2 - 2026-08-22
+
+**An audit of our own promises.** The certificate verifier met real production data for the first
+time and reported `REACHED L1` on every certificate ever issued - the layer this project itself
+describes as one a rewrite by anyone with disk access passes. That turned the question around:
+what do we claim about a layer nobody has reached? The answer was that we claimed it in the
+present tense, in the shortest and least-qualified string we publish. Nothing below changes the
+chain, the canonicalisation, the hashing, or any verdict. 305 tests.
+
+- **The PyPI Summary described a capability that is off by default.** 0.2.1 shipped
+  "hash-chained and externally anchored ledger". The library anchors nothing unless you pass a
+  `publisher` - the default is `None` and `_maybe_anchor` returns immediately without one - so
+  that phrase described a ledger that was anchored exactly never, and it reads identically whether
+  anchoring is on or off. A phrase that does not distinguish anything is decoration. It now reads
+  "hash-chained ledger anchorable to a third party by a publisher you supply".
+- **The threat model led with the anchor in the present tense.** "The external anchor is the
+  guarantee: the ledger tip `(seq, hash)` is published to a third party" stated as fact what
+  anchoring *would* give. Rewritten as the guarantee it would give, and what a default `Ledger`
+  does without it.
+- **The quick start showed only the anchored construction**, with the clarification nineteen lines
+  further down. It now shows both ways to build a `Ledger`, with the consequence beside each.
+- **The sentence that existed nowhere**: *"Without a publisher there is no anchor, and everything
+  stays at L1."* A grep for "off by default" or "opt-in" against the anchoring returned a single
+  match, and it was about dependency extras. The sentence is now in the threat model and beside
+  the snippet an operator copies.
+- **A whole verifier run never contained the strings `L2`, `L3` or `--anchors`.** It told the
+  reader that L1 does not survive an attacker with disk access and left them no way to learn that
+  a better layer existed, let alone how to reach it. `NO_EXTERNAL_ANCHOR` now names L2 and the
+  flag that gets there, inside the block the reader is already looking at, and the headline reads
+  `VERIFIED at L1, THE FLOOR LAYER` so that `VERIFIED` cannot be quoted as a grade. A run that
+  reaches L2 says neither - the remedy is tied to the absence, not printed unconditionally.
+- **The release gate never looked at the Summary.** It ran on 0.2.1, passed, and the offending
+  string shipped anyway, because the gate only read the long description. It now reads both, and
+  refuses any present-tense claim about an optional capability (`OPTIONAL_AS_PRESENT`, blunt on
+  purpose like `STALE_CLAIMS`, and documented as such so nobody softens it later). Controlled
+  against the real 0.2.1 Summary: two offences, refused.
+- **The gate itself is now tested** (`tests/test_release_gate.py`), against the strings that
+  actually shipped rather than invented ones - including the 0.2.0 stale claim, to check the older
+  rule did not regress while the new one was added.
+
 ## 0.2.1 — 2026-08-22
 
 **Everything here came from one cold-start run**: a stranger's path, in a fresh virtualenv outside

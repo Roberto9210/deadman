@@ -28,9 +28,11 @@ the call. Nothing it needs is guessed.
 
 ## Threat model, in plain words
 
-- The **external anchor is the guarantee**: the ledger tip `(seq, hash)` is published to a third party the
-  operator does not control. Everything before the latest anchor is dated by that third party and provably
-  unchanged.
+- The **external anchor is the only guarantee that survives disk access - and it is off until you switch it
+  on.** Give the ledger a `publisher` and it publishes the tip `(seq, hash)` to a third party the operator
+  does not control; everything before the latest anchor is then dated by that third party and provably
+  unchanged. **Without a publisher there is no anchor, and everything stays at L1.** The library ships no
+  publisher and contacts no one, so a default `Ledger` anchors nothing.
 - The **local hash chain is the mechanism**: it detects corruption, partial writes, buggy rewrites,
   deletions, reordering, broken rotation — and it is what lets 64 bytes cover the whole history.
 - **Signing is optional** and the key is yours (`signer`/`verifier` callables). With the key on the same disk
@@ -106,7 +108,11 @@ clock = SystemClock()
 paths = Paths("/var/lib/mybot/deadman")            # one explicit root for every state file
 ident = WriterIdentity(clock)
 
-ledger = Ledger(paths, clock, publisher=my_publisher)   # my_publisher: see examples/git_anchor_publisher.py
+# Two ways to build the ledger, and they are NOT equivalent:
+# ledger = Ledger(paths, clock)                        # no publisher -> NO ANCHOR, L1 only: a rewrite by
+#                                                      # anyone with disk access passes verification
+ledger = Ledger(paths, clock, publisher=my_publisher)  # anchored -> L2 up to the last anchor
+                                                       # my_publisher is YOUR code: examples/git_anchor_publisher.py
 kill   = KillSwitch(paths, ledger)                       # `touch /var/lib/mybot/deadman/kill_switch.enabled` stops everything
 halt   = EntryHalt(paths, clock, ident, ledger)
 halt.startup_check()                                     # another live process owns the halt file? -> loud
@@ -127,6 +133,10 @@ print(ledger.verify())                              # the ledger alone explains 
 
 `my_broker_port` is your adapter implementing `BrokerPort` (five methods). `my_publisher` is your anchor
 publisher. Neither is provided: the library does not talk to the network.
+
+**Without a publisher there is no anchor, and everything stays at L1** - the layer that a rewrite by anyone
+with disk access passes. Anchoring is opt-in, it is your code that reaches the third party, and nothing in
+this library turns it on for you.
 
 ## Using with freqtrade
 

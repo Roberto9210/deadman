@@ -85,14 +85,15 @@ declared range  : seq 1..16
 
 COULD NOT VERIFY - true even when everything above passes:
   - NO_EXTERNAL_ANCHOR: no third-party anchor was supplied, so nothing proves this ledger
-    existed before now: a full rewrite with recomputed hashes passes L1
+    existed before now: a full rewrite with recomputed hashes passes L1. TO REACH L2, ask
+    whoever holds this ledger for anchors kept by a third party and pass them with --anchors
   - OTHER_VENUES: the guardian sees one platform and the configured accounts; trading
     elsewhere is invisible to this document
   - PRE_START_BYPASS: removing the add-on with the platform closed leaves a gap, not an act
   - TRADES_OBSERVED: no event in this vocabulary records a fill count, so `tradesObserved`
     is not recomputable and is not judged here
 
-RESULT: VERIFIED at L1 (exit 0).
+RESULT: VERIFIED at L1, THE FLOOR LAYER (exit 0).
 ```
 
 **Read the bottom half.** Those four lines are printed on success, deliberately. A verifier that
