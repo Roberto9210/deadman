@@ -415,6 +415,17 @@ class CertReport:
                    "it is not a finding. A monotonic")
         out.append("  ending is a positive guarantee when present and its absence means nothing "
                    "(guardian SPEC section 17.2).")
+        out.append("  COVERAGE AND THE MINUTES MEASURE DIFFERENT THINGS, and a low coverage does "
+                   "NOT mean the guardian was")
+        out.append("  absent. Coverage is monotonic continuity, which a single restart ends for "
+                   "the whole remaining day even")
+        out.append("  if the process is back in two seconds - so a day with six brief restarts "
+                   "reads near 0% while the guardian")
+        out.append("  was running throughout. The minutes are the only figure that reports "
+                   "ABSENCE. Read them together: 0.2%")
+        out.append("  coverage beside three minutes of absence describes a day that was watched "
+                   "almost continuously but whose")
+        out.append("  clock could not be vouched for after the first restart.")
         out.append("  Coverage is derived from the ledger's own timestamps - the same clock this "
                    "could not vouch for - so it")
         out.append("  proves nothing on its own. What it does is make visible the condition "

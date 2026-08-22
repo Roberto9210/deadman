@@ -370,3 +370,31 @@ def test_an_exact_coverage_figure_is_never_suppressed_by_the_threshold():
     assert c["coverageIsLowerBound"] is False
     assert c["continuityCoverage"] is not None
     assert c["continuityCoverage"] < COVERAGE_BOUND_PUBLISHABLE_AT
+
+
+def test_a_low_coverage_beside_a_short_absence_cannot_be_read_as_a_day_spent_down():
+    """Found only on real data, and worth recording as such.
+
+    A production certificate reported 0.25% coverage next to 3.5 minutes of absence, and the two
+    read as contradictory: an evaluator anchors on 0.25% and concludes the guardian was down all
+    day. It was down for three and a half minutes. The figures measure different things - coverage
+    is monotonic continuity, which one restart ends for the rest of the day, while the minutes are
+    the only measure of ABSENCE - and the fixed text never said so.
+
+    Every synthetic scenario written before this had long gaps, where both numbers point the same
+    way. That is exactly why it took a real ledger to surface."""
+    entries = led(ARMED_OPENING + [
+        ("GUARDIAN_STOPPED", "13:06:00", {}),
+        ("GUARDIAN_STARTED", "13:06:20", {}),          # twenty seconds of real absence
+        ("PNL_CHECKPOINT", "16:00:00", {}),
+        ("DAY_CLOSED", "17:00:00", {"dayKey": "2026-08-19"}),
+    ])
+    c = continuity(entries)
+    assert c["continuityCoverage"] < 0.05          # near zero
+    assert c["unmonitoredMs"] == 20_000            # twenty seconds
+
+    block = verify_certificate(make_cert(entries, day="2026-08-19"), entries).render()
+    block = block.split("SEAL CONTINUITY")[1]
+    assert "MEASURE DIFFERENT THINGS" in block
+    assert "does NOT mean the guardian was" in block
+    assert "only figure that reports ABSENCE" in block
