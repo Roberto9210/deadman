@@ -237,29 +237,87 @@ Add to the payload, at the moment fail-closed is entered:
 defect that made `limitRespected` unusable, and re-committing it in a new field would be worse
 than leaving the field out.
 
-### What it buys
+### ANSWERED by the guardian side, and the answer withdraws the ask
 
-It converts a threshold that is currently arbitrary - *how blind is too blind* - into a real risk
-distinction based on what the blindness started with. Without it, any threshold we pick is a
-number with no evidence behind it.
+We asked whether the state was reachable at that point. **It is not, and the reason is worse than
+"not implemented yet".**
 
-**Not verified:** whether the position and order state is reachable at that point in the call path.
-We read the log site, not the surrounding lifecycle. If it is not reachable there, that is worth
-telling us, because it changes what the verifier can honestly say.
+- There are **two** emitters of `FAIL_CLOSED_ENTERED` (`Guardian.cs:221` and `:655`) and both write
+  exactly `{reason}`. The method is `EnterFailClosed(string reason)`: it receives a string and
+  holds no position or order state.
+- Reaching that state means calling `IBrokerActions.GetPositions` / `GetWorkingOrders` - **broker
+  I/O, added to the path that handles an unknown.**
+- And the common trigger for fail-closed is a disconnected or unknown account, which is **exactly
+  when the broker does not answer.** The read fails precisely when it would matter.
+
+So this is not a field to add, it is a design change - and the direct discriminator does not exist
+at the moment it would be needed. Recorded here as **not reachable without new I/O**, which is a
+different statement from the *not verified* this item originally carried.
+
+Reported by the guardian side. **We did not verify it ourselves**: that repository is not ours to
+read past what was already quoted here.
+
+### What this changes on our side, written down so nobody waits for it
+
+The duration threshold in the `outcome` design was labelled **provisional**, pending exactly this
+discriminator. **That label is now wrong and has been removed.** The threshold is the answer rather
+than a placeholder for a better one, and the reason belongs in the spec: the direct measurement is
+unavailable at the moment of blindness, not merely unrequested.
+
+A "provisional" that will never be replaced is a promise the document cannot keep - the same defect
+as a decorative field, one layer up, in our own planning instead of in a payload.
+
+### The deferred alternative, with its limit named now rather than later
+
+The guardian side proposed and deferred: record positions and working orders on every **normal**
+tick, when the broker does answer, and carry the last known value with its timestamp into the
+blindness event. **No new I/O on the dangerous path** - the read happens when it is cheap and
+reliable.
+
+We agree it is worth doing, and agree it is not urgent. Its limit belongs beside it from the start:
+**a value with an age is not the current value, and the longer the blindness lasts the less it is
+worth.** An aged position reported without its age would be a new decorative field, and this
+document would have caused it.
 
 ---
 
 ## 4b. The same rule at `LOCKOUT_INCOMPLETE`: always write the reason, never leave it inferable
 
-### Reported by the guardian side, and **not verified by us**
+### Confirmed by the guardian side; the ledger we hold still cannot corroborate it
 
-We are told that three sites emit `LOCKOUT_INCOMPLETE`, and that two of them - per-step exceptions
-at `Guardian.cs:572` and `:590` - do not carry the `exhausted` field at all.
+Confirmed by the guardian side with the detail we lacked. Three sites emit `LOCKOUT_INCOMPLETE`:
+`Guardian.cs:572` (`step: cancel`), `:590` (`step: flatten`) and `:615`. **Only `:615` carries
+`attempts` and `exhausted`**; the first two are per-step exceptions and do not carry the field at
+all.
 
-**We have no evidence of our own for this.** The 3,211-entry ledger we hold contains zero
+**We still have no evidence of our own.** The 3,211-entry ledger we hold contains zero
 `LOCKOUT_INCOMPLETE`, zero `FLATTEN_VERIFIED` and zero `LIMIT_BREACHED` - the enforcement path has
-never fired in the data we can see. This item rests entirely on the guardian side's reading of its
-own code, which is why it is written as a request to confirm rather than a finding.
+never fired in data we can see.
+
+### The case that will actually arrive, which neither side had
+
+From a real run on the guardian side against real fills, 2026-08-22:
+
+```
+19:20:42.637  LIMIT_BREACHED  dayLoss=50.00
+19:20:42.706  FLATTEN_REQUESTED
+19:20:42.706  LOCKOUT_INCOMPLETE      <- transient
+19:20:43.203  ORDERS_CANCELLED        (retry)
+19:20:43.208  FLATTEN_VERIFIED        <- 502 ms later
+```
+
+**`LOCKOUT_INCOMPLETE` appears half a second BEFORE the success**, because flattening is a real
+market order and takes time to fill. Sixteen soak runs never produced it: with synthetic P&L the
+flatten is instantaneous, so that path is structurally unreachable for the soak.
+
+This is the ordinary case, not a failure, and it settles a rule that was previously only an
+argument: **only the LAST of these events is the outcome.** A verifier that treats any
+`LOCKOUT_INCOMPLETE` as terminal would report the product's normal successful lockout as an
+incomplete one - the same shape of defect as `limitRespected`, in the replacement built to fix it.
+
+The guardian side already requires `exhausted` to be present on its own reading (`GetBool` returns
+null for an absent key), so both sides now treat absence as a different event rather than as
+`false`.
 
 ### Why it matters
 
