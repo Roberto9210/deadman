@@ -60,10 +60,19 @@ honest without it.
 
 ## What must not change
 
-`GUARDIAN_STOPPED`, `GUARDIAN_STARTED` and the `basis` field of `SEAL_EXPIRED` are now the
-derivation source for everything in that block. They were already in the vocabulary and nothing
-new is asked of them, but they have become load-bearing: dropping one from a rotated segment, or
-making it conditional, would silently reduce a published figure without anything failing. That is
+`GUARDIAN_STOPPED`, `GUARDIAN_STARTED`, the `basis` field of `SEAL_EXPIRED`, and the **`fresh`
+marker on the first `GUARDIAN_STARTED`** are now the derivation source for everything in that
+block.
+
+`fresh` earns its place on that list for a specific reason: it is the only thing distinguishing a
+genuine first boot from a ledger segment that simply does not begin at the beginning. Without it,
+every rotated segment would be indistinguishable from a session that ended ungracefully — and that
+is the one figure a reader can take as a charge. Losing the marker would not fail anything; it
+would quietly turn an "undetermined" into an accusation.
+
+All four were already in the vocabulary and nothing new is asked of them, but they have become
+load-bearing: dropping one from a rotated segment, or making it conditional, would silently reduce
+a published figure — or worse, silently strengthen one — without anything failing anywhere. That is
 worth a line in SPEC §11/§12 saying so.
 
 ## Not asked for

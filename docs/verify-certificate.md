@@ -194,9 +194,13 @@ Two honest limits, both printed rather than buried:
 - **An ungraceful exit has no measurable gap.** `GUARDIAN_STOPPED` is written on a clean shutdown
   and not on a crash or a kill, so the durations are **omitted with the reason stated** rather
   than guessed. The count of unclean shutdowns is reported instead, so neither path is silent.
-  Coverage is then published as a **lower bound**, because the moment the session ended is
-  genuinely unknown and picking the earliest possible one would read as a damning 0% for a day
-  that may have been spotless.
+  Coverage is then a **lower bound**, because the moment the session ended is genuinely unknown
+  and picking the earliest possible one would read as a damning 0% for a day that may have been
+  spotless. That bound is published **only when it constrains** — at or above 90%, where it still
+  rules out the shape this block exists to expose. Below that it is omitted with its reason, on a
+  general principle worth stating once: *a bound is information when the interval it leaves open
+  is small; when that interval is almost the whole range, the number does not measure, it only
+  suggests* — and a reader anchors on the figure, never on the words "at least" in front of it.
 - **A missing shutdown record is not evidence of anything on its own**, and the block says so
   next to the number. A crash, a power cut, a ledger rotation that left the record in an earlier
   segment, and a range that begins between a shutdown and its restart all look identical from

@@ -236,7 +236,9 @@ class CertReport:
             return out
 
         coverage = c.get("continuityCoverage")
-        if coverage is None:
+        if coverage is None and c.get("coverageOmittedBecause"):
+            out.append(f"  coverage        not reported: {c['coverageOmittedBecause']}")
+        elif coverage is None:
             out.append("  coverage        not computable from this range")
         elif c.get("coverageIsLowerBound"):
             out.append(f"  coverage        at least {coverage * 100:.0f}% of the sealed period - a "
@@ -540,6 +542,25 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
                           f"certificate covering the closed session")
 
 
+#: A BOUND IS ONLY WORTH PUBLISHING WHEN IT CONSTRAINS.
+#:
+#: The general rule, written here because it will apply again: a bound is information when the
+#: interval it leaves open is small. When that interval is almost the whole possible range, the
+#: number does not measure - it only suggests. And a reader anchors on the figure, not on the
+#: label attached to it: "at least 3%" is read as 3%, however carefully it is qualified, even
+#: when the truth might be 99%.
+#:
+#: So a coverage lower bound is published only at or above this threshold, and omitted with its
+#: reason below it - the same treatment the gap durations already get. This is the same inversion
+#: applied to sealExpiryBasis: state the thing when it is a guarantee, say nothing when it is not.
+#:
+#: 0.90 is chosen because it is the point where the bound still excludes the attack it exists to
+#: make visible. At 90% the unaccounted stretch is at most a tenth of the sealed period - under an
+#: hour on a typical nine-hour session - which is too short to hold the close-move-reopen shape,
+#: because moving the clock forward makes the resulting gap MEASURE long. Below that the open
+#: interval is wide enough to contain almost anything, and the number stops constraining.
+COVERAGE_BOUND_PUBLISHABLE_AT = 0.90
+
 #: The events these quantities are derived from. Only guardian-core-v1 emits them: the
 #: deadman-kit dialect's own vocabulary (KINDS in deadman/ledger.py) has no process lifecycle at
 #: all. On such a ledger every quantity below is OMITTED rather than reported as zero - a zero
@@ -715,6 +736,13 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
         "continuityCoverage": coverage,
         "coverageIsLowerBound": coverage_is_lower_bound,
     }
+    if (coverage_is_lower_bound and coverage is not None
+            and coverage < COVERAGE_BOUND_PUBLISHABLE_AT):
+        out["continuityCoverage"] = None
+        out["coverageOmittedBecause"] = (
+            f"the only figure derivable here is a lower bound, and at {coverage * 100:.0f}% it "
+            f"leaves almost the whole range open. A bound that does not constrain is not a "
+            f"measurement, and a reader anchors on the number rather than on the word 'at least'")
 
     # The partition that leaves no path silent: a clean shutdown yields a measurable gap; an
     # unclean one yields no duration but IS reported as unclean. Omission without a stated reason

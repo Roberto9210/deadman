@@ -24,8 +24,8 @@ from __future__ import annotations
 import json
 
 from deadman.verify_certificate import (
-    DEADMAN_KIT_V1, EXIT_CONTRADICTED, GUARDIAN_CORE_V1, find_backwards_timestamps,
-    recompute_continuity, verify_certificate,
+    COVERAGE_BOUND_PUBLISHABLE_AT, DEADMAN_KIT_V1, EXIT_CONTRADICTED, GUARDIAN_CORE_V1,
+    find_backwards_timestamps, recompute_continuity, verify_certificate,
 )
 
 from test_c_certificate import QUIET_DAY, kledger, make_cert
@@ -48,7 +48,11 @@ def continuity(entries):
 
 
 ARMED_OPENING = [
-    ("GUARDIAN_STARTED", "13:00:00", {}),
+    # `fresh: true` is what Start() writes when there was no state to restore. A real ledger's
+    # first line carries it; only a rotated segment opens with a start that lacks it. Omitting it
+    # here made every fixture look like a rotated segment, which is a fixture modelling something
+    # that does not happen.
+    ("GUARDIAN_STARTED", "13:00:00", {"state": "DISARMED", "fresh": True}),
     ("ARMED", "13:05:00", {}),
     ("SEAL_CREATED", "13:05:01", {}),
     ("DAY_OPENED", "13:05:02", {"dayKey": "2026-08-19"}),
@@ -324,3 +328,45 @@ def test_the_block_says_a_rotated_segment_looks_the_same_as_an_unclean_exit():
     block = verify_certificate(make_cert(entries), entries).render().split("SEAL CONTINUITY")[1]
     assert "rotation" in block.lower() or "rotated" in block.lower(), (
         "the block must name ledger rotation as an explanation it cannot rule out")
+
+
+# ---------------------------------------------------------------- a bound must constrain
+
+def test_a_low_coverage_bound_is_omitted_rather_than_published():
+    """A bound is information when the interval it leaves open is small. "At least 3%" when the
+    truth might be 99% is not a measurement - it is an insinuation shaped like one, and a reader
+    anchors on the number, never on the label. So it is omitted with its reason, exactly like the
+    gap durations."""
+    c = continuity(led(ARMED_OPENING + [
+        ("GUARDIAN_STARTED", "17:39:00", {"state": "ARMED"}),
+        ("DAY_CLOSED", "17:39:02", {"dayKey": "2026-08-19"}),
+    ]))
+    assert c["continuityCoverage"] is None
+    assert "does not constrain" in c["coverageOmittedBecause"]
+    assert "anchors on the number" in c["coverageOmittedBecause"]
+
+
+def test_a_high_coverage_bound_is_published_because_it_asserts_something():
+    """The inversion already used for sealExpiryBasis: say it when it is a guarantee, say nothing
+    when it is not. "At least 96%" genuinely rules out the shape this block exists to expose."""
+    c = continuity(led(ARMED_OPENING + [
+        ("PNL_CHECKPOINT", "16:50:00", {}),
+        ("GUARDIAN_STARTED", "17:00:00", {"state": "ARMED"}),
+        ("DAY_CLOSED", "17:00:02", {"dayKey": "2026-08-19"}),
+    ]))
+    assert c["continuityCoverage"] is not None
+    assert c["continuityCoverage"] >= COVERAGE_BOUND_PUBLISHABLE_AT
+    assert c["coverageIsLowerBound"] is True
+
+
+def test_an_exact_coverage_figure_is_never_suppressed_by_the_threshold():
+    """The threshold applies only to BOUNDS. A day with clean shutdowns throughout has an exact
+    figure, and a low exact figure is a fact rather than an insinuation - it gets published."""
+    c = continuity(led(ARMED_OPENING + [
+        ("GUARDIAN_STOPPED", "13:06:00", {}),
+        ("GUARDIAN_STARTED", "17:00:00", {}),
+        ("DAY_CLOSED", "17:30:00", {"dayKey": "2026-08-19"}),
+    ]))
+    assert c["coverageIsLowerBound"] is False
+    assert c["continuityCoverage"] is not None
+    assert c["continuityCoverage"] < COVERAGE_BOUND_PUBLISHABLE_AT
