@@ -165,6 +165,51 @@ python -m deadman.verify_certificate certificate.json ledger.jsonl --pubkey issu
 
 ---
 
+## Seal continuity — what the tool derives that the certificate never claims
+
+Every run prints a **SEAL CONTINUITY** block. Nothing in it comes from the certificate: it is
+computed here, from the ledger, which is what makes it a *verified* quantity rather than an
+asserted one — the same distinction as an external anchor versus a hash chain.
+
+It exists because the guardian's own specification (§17.2) admits a gap it cannot close: across a
+process restart the seal is no longer measured on a monotonic counter and falls back to the
+machine's wall clock, which the trader can move. Closing that needs a time source off the machine,
+and the guardian opens no sockets. **So it is made noisy instead.** An ordinary restart lasts
+seconds; a long gap in the middle of a sealed session is the shape the attack needs.
+
+| line | what it says |
+|---|---|
+| `coverage` | how much of the sealed period the seal's own monotonic counter could vouch for. A single restart ends it for the rest of the day, even if the process returns in two seconds |
+| `process starts` | restarts after arming, and how many followed a session that ended without a clean shutdown |
+| `time with no guardian running` | total, and the longest single gap — reported separately, because four hours in one hole and twenty two-second holes give similar totals and mean opposite things |
+| the ending | stated **only** when the day ended on a monotonic counter, which is a positive guarantee. A wall-clock ending is the normal case and is never presented as a finding |
+
+**Read the fixed paragraph underneath it.** Restarts are produced by Windows updates and ordinary
+closes exactly as by anything else, and coverage is derived from the ledger's own timestamps — the
+same clock that could not be vouched for — so **it proves nothing on its own.** What it does is
+put the condition where a reader can see it.
+
+Two honest limits, both printed rather than buried:
+
+- **An ungraceful exit has no measurable gap.** `GUARDIAN_STOPPED` is written on a clean shutdown
+  and not on a crash or a kill, so the durations are **omitted with the reason stated** rather
+  than guessed. The count of unclean shutdowns is reported instead, so neither path is silent.
+- **A `deadman-kit-v1` ledger cannot supply any of it.** That vocabulary has no process-lifecycle
+  events at all, so the block says so instead of printing zeros — a zero would claim no restarts
+  happened, which is a different statement from *this record cannot say*.
+
+### Timestamps that move backwards
+
+Independently of all of the above, the tool reports any `tsUtc` that moves **backwards** between
+consecutive entries. It needs no event the vocabulary lacks, so it works on both dialects and on
+every certificate ever issued.
+
+It targets the return journey. Moving a clock forward leaves no backwards step; moving it *back*
+does — and it has to be moved back to keep trading against coherent market data. The entries are
+hash-chained, so the step cannot be edited out quietly. It says the machine's clock moved during
+the session; it does not by itself say why, and daylight saving does not produce it, because every
+timestamp is UTC.
+
 ## Checking a run of days
 
 One good day proves very little. A series with no gaps is the thing worth showing, and each

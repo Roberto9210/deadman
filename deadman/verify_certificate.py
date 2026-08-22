@@ -64,6 +64,24 @@ def canonical_json(obj: Mapping[str, Any]) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
+def _human_ms(ms: Optional[int]) -> str:
+    """Durations a person reads without counting zeros. Seconds matter here: an ordinary restart
+    lasts seconds and a gap of hours is the shape that matters, so the units must make the two
+    impossible to confuse at a glance."""
+    if ms is None:
+        return "unknown"
+    if ms < 1000:
+        return f"{ms} ms"
+    seconds = ms / 1000.0
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    minutes = seconds / 60.0
+    if minutes < 90:
+        return f"{minutes:.0f} min"
+    hours = int(minutes // 60)
+    return f"{hours} h {int(minutes - hours * 60):02d} min"
+
+
 def _sha256_hex(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -174,6 +192,8 @@ class CertReport:
     covered_up_to_seq: Optional[int] = None
     anchors_checked: int = 0
     recomputed: dict = field(default_factory=dict)
+    continuity: dict = field(default_factory=dict)
+    backwards_time: list = field(default_factory=list)
     contradictions: list[Finding] = field(default_factory=list)
     unverified: list[Finding] = field(default_factory=list)
     unevaluable: list[Finding] = field(default_factory=list)
@@ -196,6 +216,74 @@ class CertReport:
 
     def cannot_evaluate(self, code: str, detail: str) -> None:
         self.unevaluable.append(Finding(code, detail))
+
+    # -------------------------------------------------------------- continuity
+    def _continuity_lines(self) -> list:
+        """Seal continuity, and the fixed text that has to travel with it.
+
+        The wording is load-bearing. This is read by a prop firm's risk desk, and every number
+        here has an innocent explanation that is also the common one. Nothing may read as an
+        accusation, and the normal case must be stated as normal.
+        """
+        c = self.continuity
+        if not c:
+            return []
+
+        out = ["", "SEAL CONTINUITY - derived from the ledger by this tool, not claimed by the "
+                   "certificate:"]
+        if not c.get("supported"):
+            out.append(f"  not available: {c['reason']}")
+            return out
+
+        coverage = c.get("continuityCoverage")
+        out.append("  coverage        " + (f"{coverage * 100:.0f}% of the sealed period"
+                                           if coverage is not None else "not computable"))
+        out.append(f"  process starts  {c.get('processRestarts', 0)} after arming"
+                   + (f", {c['uncleanShutdowns']} of them following a session that ended without "
+                      f"a clean shutdown" if c.get("uncleanShutdowns") else ""))
+
+        if c.get("longestGapMs") is not None:
+            longest, total = c["longestGapMs"], c.get("unmonitoredMs") or 0
+            out.append(f"  time with no guardian running  {_human_ms(total)}"
+                       + (f", longest single gap {_human_ms(longest)}" if longest else ""))
+        else:
+            out.append(f"  time with no guardian running  not derivable: "
+                       f"{c.get('durationsOmittedBecause')}")
+
+        basis = c.get("sealExpiryBasis")
+        if basis == "monotonic":
+            out.append("  the day ended on a monotonic counter, which nobody can adjust: the "
+                       "process ran without interruption from arming until the seal expired")
+        elif not c.get("dayClosed"):
+            out.append("  the session had not closed within the certified range, so nothing is "
+                       "said about how it ended")
+
+        if self.backwards_time:
+            first = self.backwards_time[0]
+            out.append("")
+            out.append(f"  NOTE  {len(self.backwards_time)} timestamp(s) move BACKWARDS between "
+                       f"consecutive entries, first at seq {first['fromSeq']} -> {first['toSeq']} "
+                       f"by {_human_ms(first['byMs'])}.")
+            out.append("        Entries are hash-chained, so this cannot be edited out quietly. "
+                       "It means the machine's clock moved during the session; it does not by "
+                       "itself say why, and daylight-saving changes are handled in UTC and do "
+                       "not produce it.")
+
+        out.append("")
+        out.append("  Restarts happen for Windows updates, ordinary closes and crashes. These "
+                   "lines describe what evidence")
+        out.append("  decided the day, not that anyone did anything. Ending on the WALL CLOCK is "
+                   "the normal case - it is what")
+        out.append("  every trader who closes the platform at the end of the day produces, and "
+                   "it is not a finding. A monotonic")
+        out.append("  ending is a positive guarantee when present and its absence means nothing "
+                   "(guardian SPEC section 17.2).")
+        out.append("  Coverage is derived from the ledger's own timestamps - the same clock this "
+                   "could not vouch for - so it")
+        out.append("  proves nothing on its own. What it does is make visible the condition "
+                   "under which that documented gap")
+        out.append("  is exploitable, instead of leaving it buried in a file nobody opens.")
+        return out
 
     # -------------------------------------------------------------- rendering
     def render(self) -> str:
@@ -234,6 +322,8 @@ class CertReport:
             add("CONTRADICTIONS - the certificate does not survive its own evidence:")
             for f in self.contradictions:
                 add(f"  - {f}")
+
+        L.extend(self._continuity_lines())
 
         add("")
         add("COULD NOT VERIFY - true even when everything above passes:")
@@ -413,6 +503,185 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
                           f"DAY_CLOSED for this session the verifier cannot tell an export taken "
                           f"mid-session from a range truncated to exclude them - ask for a "
                           f"certificate covering the closed session")
+
+
+#: The events these quantities are derived from. Only guardian-core-v1 emits them: the
+#: deadman-kit dialect's own vocabulary (KINDS in deadman/ledger.py) has no process lifecycle at
+#: all. On such a ledger every quantity below is OMITTED rather than reported as zero - a zero
+#: would claim "no restarts happened", which is not what "this dialect cannot say" means.
+_CONTINUITY_EVENTS = ("GUARDIAN_STARTED", "GUARDIAN_STOPPED", "SEAL_CREATED", "SEAL_EXPIRED")
+
+
+def _ms_between(a: Optional[str], b: Optional[str]) -> Optional[int]:
+    """Milliseconds between two ISO-8601 UTC stamps, or None if either is unusable."""
+    from datetime import datetime
+    if not a or not b:
+        return None
+    try:
+        ta = datetime.strptime(a, "%Y-%m-%dT%H:%M:%S.%fZ")
+        tb = datetime.strptime(b, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except (ValueError, TypeError):
+        return None
+    return int((tb - ta).total_seconds() * 1000)
+
+
+def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
+                         from_seq: int, to_seq: int) -> dict:
+    """How much of the armed day the guardian's own clock could vouch for.
+
+    SPEC section 17.2 states the gap plainly: across a process restart the seal is no longer
+    measured on a monotonic counter, and falls back to the wall clock. That cannot be closed
+    without a time source off the machine, which v1 does not have. It can be made NOISY - a
+    legitimate restart lasts seconds, and a long gap is the shape the attack needs.
+
+    Two rules govern every name and every sentence produced here:
+
+    * **It reports coverage, never blame.** A restart with a wall-clock expiry is produced by a
+      Windows update at 3am exactly as it is by someone cheating. A field that accuses the
+      innocent becomes noise people learn to skip, and then it protects nobody.
+    * **The verifier computes it, so it is a VERIFIED quantity.** Were the emitter to publish it,
+      it would be an asserted one. That is the same distinction as an external anchor versus a
+      hash chain, and this project already chose a side.
+
+    WHY THIS DOES NOT MEASURE SILENCE, which matters for anyone tempted to "improve" it later:
+    the guardian's five-minute PNL_CHECKPOINT heartbeat is NOT emitted while DISARMED or while
+    LOCKED - `Tick()` returns before reaching it in both states. A four-hour lockout with the
+    guardian running perfectly leaves the ledger silent, so inferring gaps from silence would
+    report four hours "with no guardian", which is false, and false in the direction that
+    accuses. Gaps are therefore measured only between explicit lifecycle events.
+    """
+    rows = _events_in_range(entries, dialect, from_seq, to_seq)
+    ev, ts = dialect.f_event, dialect.f_ts
+    names = [r.get(ev) for r in rows]
+
+    # Decided by DIALECT, not by which events happen to appear. deadman-kit's vocabulary
+    # (KINDS in deadman/ledger.py) has no process lifecycle at all, so on such a ledger these
+    # quantities do not exist - and "do not exist" is reported, never zero. A zero would claim
+    # "no restarts happened", which is a different statement from "this record cannot say".
+    if dialect.name != GUARDIAN_CORE_V1.name:
+        return {
+            "supported": False,
+            "reason": (f"the {dialect.name} vocabulary has no process-lifecycle events "
+                       f"(GUARDIAN_STARTED / GUARDIAN_STOPPED / SEAL_EXPIRED), so seal-continuity "
+                       f"cannot be derived from this ledger at all"),
+        }
+
+    if not any(n in _CONTINUITY_EVENTS for n in names):
+        return {
+            "supported": False,
+            "reason": ("this range contains no process-lifecycle events, so there is nothing to "
+                       "derive seal continuity from"),
+        }
+
+    # The window starts at SEAL_CREATED, not at ARMED: the seal is the thing whose continuity
+    # is being measured, and it does not exist until then. Measuring from ARMED made a day
+    # with no restarts read 0.92 rather than 1.00, and a number that is not 1.00 on a clean
+    # day is a number nobody will trust.
+    armed_start = next((r.get(ts) for r in rows if r.get(ev) == "SEAL_CREATED"), None)
+    armed_end = next((r.get(ts) for r in rows if r.get(ev) == "DAY_CLOSED"), None)
+    day_closed = armed_end is not None
+    if armed_end is None and rows:
+        armed_end = rows[-1].get(ts)
+
+    # sealExpiryBasis: a POSITIVE guarantee when it says monotonic, never a suspicion otherwise.
+    expiry = next((r for r in rows if r.get(ev) == "SEAL_EXPIRED"), None)
+    basis = (expiry.get(dialect.f_payload) or {}).get("basis") if expiry else None
+
+    restarts = unclean = 0
+    gaps: list = []
+    open_stop: Optional[str] = None
+    continuity_ms = 0
+    continuous_since: Optional[str] = None
+    last_seen: Optional[str] = None
+    armed_seen = False          # nothing before the first SEAL_CREATED is a restart of anything
+
+    for r in rows:
+        name, when = r.get(ev), r.get(ts)
+        if name == "SEAL_CREATED":
+            continuous_since = when
+            armed_seen = True
+        elif name == "GUARDIAN_STOPPED":
+            open_stop = when
+            if continuous_since is not None:
+                continuity_ms += _ms_between(continuous_since, when) or 0
+                continuous_since = None
+        elif name == "GUARDIAN_STARTED":
+            # The first start of a fresh process, before anything was armed, is a boot and not a
+            # restart. Counting it inflated every quiet day by one.
+            if not armed_seen:
+                last_seen = when or last_seen
+                continue
+            restarts += 1
+            if open_stop is not None:
+                gaps.append(_ms_between(open_stop, when))
+                open_stop = None
+            else:
+                # No GUARDIAN_STOPPED preceded this start. Stop() is what writes it, and Stop()
+                # does not run on a crash, a kill, or a power cut - so the previous session ended
+                # without a clean shutdown and the gap has no measurable beginning.
+                unclean += 1
+                if continuous_since is not None:
+                    # Count coverage only up to the last moment there is evidence of life.
+                    continuity_ms += _ms_between(continuous_since, last_seen) or 0
+                    continuous_since = None
+        last_seen = when or last_seen
+
+    if continuous_since is not None:
+        continuity_ms += _ms_between(continuous_since, armed_end) or 0
+
+    armed_ms = _ms_between(armed_start, armed_end)
+    coverage = None
+    if armed_ms and armed_ms > 0:
+        coverage = max(0.0, min(1.0, continuity_ms / armed_ms))
+
+    measured = [g for g in gaps if g is not None]
+    out = {
+        "supported": True,
+        "armedMs": armed_ms,
+        "dayClosed": day_closed,
+        "sealExpiryBasis": basis,
+        "processRestarts": restarts,
+        "uncleanShutdowns": unclean,
+        "continuityCoverage": coverage,
+    }
+
+    # The partition that leaves no path silent: a clean shutdown yields a measurable gap; an
+    # unclean one yields no duration but IS reported as unclean. Omission without a stated reason
+    # would be a mystery, so the reason travels with it.
+    if unclean:
+        out["unmonitoredMs"] = None
+        out["longestGapMs"] = None
+        out["durationsOmittedBecause"] = (
+            f"{unclean} session(s) in this range ended without a clean shutdown, so those gaps "
+            f"have no measurable start")
+    else:
+        out["unmonitoredMs"] = sum(measured) if measured else 0
+        out["longestGapMs"] = max(measured) if measured else 0
+    return out
+
+
+def find_backwards_timestamps(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
+                              from_seq: int, to_seq: int) -> list:
+    """Timestamps that move BACKWARDS between consecutive seq in a hash-chained file.
+
+    The strongest of these signals and the cheapest: the chain is already walked in seq order,
+    and this needs no event the vocabulary does not already have. It works on both dialects and
+    on every certificate ever issued.
+
+    What it targets is the return journey. Moving a clock forward leaves no backwards step;
+    moving it BACK does - and it has to be moved back to keep trading against coherent market
+    data. That leg is the one an attacker cannot avoid, and it cannot be repaired quietly,
+    because repairing it means rewriting entries whose hashes chain.
+    """
+    rows = _events_in_range(entries, dialect, from_seq, to_seq)
+    ts, seqf = dialect.f_ts, dialect.f_seq
+    out = []
+    for previous, current in zip(rows, rows[1:]):
+        back = _ms_between(current.get(ts), previous.get(ts))
+        if back is not None and back > 0:
+            out.append({"fromSeq": previous.get(seqf), "toSeq": current.get(seqf),
+                        "byMs": back, "at": current.get(ts)})
+    return out
 
 
 def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
@@ -638,6 +907,8 @@ def verify_certificate(cert: Mapping[str, Any],
 
     # ---- claims, recomputed and compared
     rep.recomputed = recompute_claims(ledger_entries, dialect, from_seq, to_seq, rep.chain_ok)
+    rep.continuity = recompute_continuity(ledger_entries, dialect, from_seq, to_seq)
+    rep.backwards_time = find_backwards_timestamps(ledger_entries, dialect, from_seq, to_seq)
     claimed = cert.get("claims") or {}
     commitment = cert.get("commitment") or {}
 
