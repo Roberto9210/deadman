@@ -81,13 +81,40 @@ gh run view <run-id> --log | grep -i "Uploading deadman_kit-<version>"
       and soft-404s alike, so a reachable link is not a correct one. Pair each sampled link with a
       phrase that must appear in the response.
 
+## Step N — pin the README's links to the tag
+
+**This is a step of a release, not a standalone commit.** Done at the wrong moment it is worse
+than not doing it: the links must point at a tag that already exists, and a tag only exists once
+the release is under way.
+
+The problem it solves is drift wearing different clothes. The description is frozen at
+publication; its links point at `/blob/main/`, a branch that keeps moving. In six months that
+frozen page will describe files `main` has since changed — exactly the failure the cold-start run
+found, one level up.
+
+The order matters and the safety condition is not optional:
+
+1. Tag the release and **push the tag first**.
+2. **Verify the tag exists on the remote before rewriting a single link.** Get this wrong and all
+   39 links 404 simultaneously, which is worse and more immediate than pointing at `main`, which
+   fails slowly and mildly:
+
+       git ls-remote --tags origin "refs/tags/v<version>"    # must print a line
+
+3. Only then rewrite `/blob/main/` → `/blob/v<version>/` and `/tree/main/` → `/tree/v<version>/`
+   in `README.md`.
+4. Rebuild and re-run the description gate; **check a sample of the rewritten links by content**,
+   not by status code, exactly as after any release.
+5. Once this is in place, add `/blob/main/` and `/tree/main/` to the gate's refusals, so a
+   published description can never again aim at a moving branch.
+
+Until step 5 is done the gate does **not** catch this, and that is the honest state: the defect is
+known, written down here, and deliberately not fixed in a rush.
+
 ## Known, deliberately unfixed
 
-- The README's absolute links point at `/blob/main/`. A description frozen in a release and aimed
-  at a moving branch is the same drift defect in different clothes. Pinning them to the tag is
-  correct and is **not** done casually: get it wrong and every link 404s at once, which is worse
-  and immediate, where `main` fails slowly and mildly. Do it with a check that the tag exists
-  before anything is rewritten.
+- The README's absolute links still point at `/blob/main/`. See the step above; it is scheduled,
+  not forgotten.
 
 ## The rule underneath all of this
 
