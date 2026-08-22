@@ -233,6 +233,26 @@ written up in full — it is the most useful page in this repository.
 Full guide, including the three trust layers and what none of them prove:
 [**`docs/verify-certificate.md`**](https://github.com/Roberto9210/deadman/blob/main/docs/verify-certificate.md).
 
+## How this is checked from the outside
+
+Every claim above is testable in this repository, which is the easy half. The harder half is
+whether any of it survives contact with someone who does not have the repository — so the verifier
+is periodically run as a **cold start**: a stranger's path, in a fresh virtualenv outside the
+checkout, installing only from PyPI and reading only published pages, fixing nothing along the way.
+
+The runs are published in full at
+[**`docs/COLD_START_LOG.md`**](https://github.com/Roberto9210/deadman/blob/main/docs/COLD_START_LOG.md), including the one where the
+published page still told readers to clone the repository because the release they had just
+installed supposedly did not exist yet — the point at which a reasonable reader gives up, found
+because nobody was allowed to fix anything mid-run. That run is why `--example`
+exists, why the examples ship inside the package, and why a release now cannot publish a stale
+description.
+
+Reading the repository would not have found it: the repository was right the whole time. The
+artefact was what was wrong. How a release is cut, and how it is verified afterwards by being the
+stranger rather than by reading the source, is in
+[`docs/RELEASING.md`](https://github.com/Roberto9210/deadman/blob/main/docs/RELEASING.md).
+
 ## Install and test
 
 ```bash

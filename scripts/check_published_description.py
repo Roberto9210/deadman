@@ -32,6 +32,12 @@ from pathlib import Path
 
 #: Claims that are true only until the next release and become lies the moment it ships.
 #: Matched case-insensitively as substrings of the published description.
+#:
+#: This is deliberately blunt, and it WILL fire on prose that merely quotes one of these
+#: phrases while describing a past defect - it did, on the README section about the
+#: cold-start run. The correct response is to reword the sentence, never to teach this
+#: list to tell quotation from assertion. A gate that can be argued with stops being a
+#: gate, and the cost of bluntness is one rewritten sentence.
 STALE_CLAIMS = [
     "not on pypi yet",
     "not yet on pypi",

@@ -7,7 +7,7 @@ ubuntu/windows/macos × Python 3.10/3.12/3.14, real-process tests unmarked, ever
 visible with its reason), then builds sdist + wheel with `python -m build`, installs the wheel into a clean venv with
 `--no-deps` from a neutral cwd and runs a smoke flow asserting zero non-stdlib modules loaded, and only
 then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
-`release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`.
+`release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`. The human half - what to check before tagging, and how to confirm a release really landed without being fooled by PyPI's cached `/json` endpoint or pip's cached index - is in [`docs/RELEASING.md`](https://github.com/Roberto9210/deadman/blob/main/docs/RELEASING.md).
 
 ## 0.2.1 — 2026-08-22
 
