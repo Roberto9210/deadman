@@ -112,7 +112,12 @@ def make_cert(entries, dialect=GUARDIAN_CORE_V1, day="2026-08-21", *, honest=Tru
                     "timezone": "America/Chicago"},
         "previousCertHash": prev_cert,
         "continuity": {"daysCovered": 1, "gaps": gaps or []},
-        "commitment": {"armedAtUtc": TS % 0, "sealHash": "seal", "sealExpiryUtc": TS % 59,
+        # A real-shaped seal hash. It used to read "seal", which rule 5 correctly flags as a
+        # decorative field: a word in something named `...Hash` distinguishes nothing. The
+        # verifier caught this fixture the moment the rule was enforced on the receiving side.
+        "commitment": {"armedAtUtc": TS % 0,
+                       "sealHash": hashlib.sha256(b"fixture seal").hexdigest(),
+                       "sealExpiryUtc": TS % 59,
                        "personalDailyLossLimit": "600.00", "firmDailyLossLimit": "1000.00",
                        "changeAttemptsWhileSealed": c["changeAttemptsWhileSealed"]},
         "claims": {

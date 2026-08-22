@@ -37,6 +37,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -159,6 +160,117 @@ REQUIRED_LIMITATIONS: tuple[str, ...] = (
     "This is not an audit. Nobody inspected this trader. It is a machine's signed assertion "
     "about a record that machine kept.",
 )
+
+
+# --------------------------------------------------------------------------------------
+# CERT_SPEC rule 5, checked by the receiver
+#
+# "A field that looks like evidence and is not is worse than an absent field."
+#
+# The rule's own test is *what does it distinguish?* - if two things that should differ produce
+# the same value, or two identical things produce different ones, the field does not measure what
+# its name says and must be omitted or renamed. That question cannot be answered mechanically in
+# general. What CAN be answered from a single document is its sharpest special case: a field whose
+# NAME promises a specific form, carrying a value that cannot possibly have that form.
+#
+# `"buildHash": "example"` is the case that produced the rule. A word is not a fingerprint; it
+# distinguishes nothing; and nothing in the shipped verifier would have told a recipient so.
+# --------------------------------------------------------------------------------------
+
+#: Values that look like content and carry none. Matched as whole values, case-insensitively, so
+#: a self-describing alias like "example-trader" passes while a bare "example" does not.
+DECORATIVE_FILLER = frozenset({
+    "example", "test", "sample", "sample-value", "todo", "tbd", "changeme", "placeholder",
+    "dummy", "foo", "bar", "baz", "xxx", "n/a", "none", "null", "unknown", "unset",
+    "1.0.0.0", "0.0.0.0", "string", "value", "your-value-here", "",
+})
+
+_HEXISH = re.compile(r"^[0-9a-f]{16,}$")
+_ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")
+_VERSIONISH = re.compile(r"^\d+\.\d+\.\d+(\.\d+)?([-+][0-9A-Za-z.-]+)*$")
+_MONEY = re.compile(r"^-?\d+\.\d{2}$")
+
+
+def _promise_violations(node: Any, path: str = "") -> list:
+    """Leaves whose key promises a form their value cannot have.
+
+    Deliberately narrow. Only names that promise something specific and checkable are examined -
+    a free-text `alias` or a `tool` name promises nothing and is left alone. The cost of a false
+    accusation here is a certificate wrongly refused, so the checks err toward silence.
+    """
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            out.extend(_promise_violations(v, f"{path}.{k}" if path else k))
+        return out
+    if isinstance(node, list):
+        for i, v in enumerate(node):
+            out.extend(_promise_violations(v, f"{path}[{i}]"))
+        return out
+
+    if node is None or path == "":
+        return out
+    key = path.split(".")[-1].split("[")[0]
+    low = key.lower()
+
+    def fail(promise: str, why: str):
+        out.append((path, node, promise, why))
+
+    if low.endswith("hash"):
+        if not isinstance(node, str) or not _HEXISH.match(node):
+            fail("a cryptographic hash",
+                 "a hash is lowercase hex of at least 16 characters; this cannot be one, so the "
+                 "field distinguishes nothing")
+    elif low.endswith("utc") or low.endswith("atutc"):
+        if not isinstance(node, str) or not _ISO_UTC.match(node):
+            fail("an ISO-8601 UTC timestamp",
+                 "the name promises a point in time and the value is not one")
+    elif low == "version":
+        if not isinstance(node, str) or not _VERSIONISH.match(node):
+            fail("a version",
+                 "the name promises something that identifies a build, and this does not")
+    elif low.endswith("limit") or low.endswith("loss"):
+        if not isinstance(node, str) or not _MONEY.match(node):
+            fail("money as a decimal string",
+                 "money is a string with exactly two decimals (SPEC section 4); a number or a "
+                 "loose string cannot be compared exactly")
+    return out
+
+
+def check_rule_five(cert: Mapping[str, Any]) -> list:
+    """Every decorative field a single document can betray, as (code, detail) pairs.
+
+    A recipient runs this without our source, which is the point: the rule is normative in the
+    specification, and until it is checkable by the person receiving a certificate it protects
+    nobody who matters.
+    """
+    findings = []
+
+    for path, value in _walk_leaves(cert):
+        if isinstance(value, str) and value.strip().lower() in DECORATIVE_FILLER:
+            findings.append((
+                "DECORATIVE_FIELD",
+                f"`{path}` is {value!r} - a filler value that looks like content and carries "
+                f"none. SPEC rule 5: a field that looks like evidence and is not is worse than "
+                f"an absent field; omit it instead"))
+
+    for path, value, promise, why in _promise_violations(cert):
+        findings.append((
+            "FIELD_BELIES_ITS_NAME",
+            f"`{path}` is named for {promise} but holds {value!r}. {why}"))
+
+    return findings
+
+
+def _walk_leaves(node: Any, path: str = ""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _walk_leaves(v, f"{path}.{k}" if path else k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _walk_leaves(v, f"{path}[{i}]")
+    else:
+        yield path, node
 
 
 # --------------------------------------------------------------------------------------
@@ -1082,6 +1194,10 @@ def verify_certificate(cert: Mapping[str, Any],
                                f"`failClosedEpisodes[{i}].open`: certificate says "
                                f"{t.get('open')!r}, the events say {m['open']!r}")
 
+    # ---- rule 5: fields that promise more than they carry
+    for code, detail in check_rule_five(cert):
+        rep.contradict(code, detail)
+
     # ---- limitations, verbatim (C10)
     stated = cert.get("limitations")
     if not isinstance(stated, list):
@@ -1338,6 +1454,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # The cold-start run stopped here. The message was accurate and ended one sentence early:
         # it never said what to do next, and "ledger" means nothing to someone who has just been
         # handed a certificate by a stranger.
+        # Rule 5 needs only the document, so run it before giving up. This is the moment a
+        # recipient has least information and most need - somebody handed them one file -
+        # and staying silent would waste the one check that still works without a ledger.
+        rule_five = check_rule_five(cert)
+        if rule_five:
+            print(f"Found in the certificate itself, without needing the ledger "
+                  f"({len(rule_five)} item(s)). CERT_SPEC rule 5: a field that looks "
+                  f"like evidence and is not is worse than an absent field.",
+                  file=sys.stderr)
+            for code, detail in rule_five:
+                print(f"  - {code}: {detail}", file=sys.stderr)
+            print(file=sys.stderr)
+        
         print("COULD NOT EVALUATE - no ledger given; the certificate cannot judge itself.\n"
               "\n"
               "A certificate is a summary. The ledger is the append-only record of what actually\n"

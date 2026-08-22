@@ -165,6 +165,35 @@ python -m deadman.verify_certificate certificate.json ledger.jsonl --pubkey issu
 
 ---
 
+## Fields that promise more than they carry
+
+The specification's rule 5 says *a field that looks like evidence and is not is worse than an
+absent field*, and its test is **what does it distinguish?** — if two things that should differ
+produce the same value, the field does not measure what its name says.
+
+The verifier now checks the sharpest case of that from the document alone: **a field whose NAME
+promises a specific form, holding a value that cannot have it.** A `buildHash` containing a word
+is not a fingerprint; it distinguishes nothing.
+
+| the name promises | what is required |
+|---|---|
+| `…Hash` | lowercase hex, at least 16 characters |
+| `…Utc` | an ISO-8601 UTC timestamp |
+| `version` | something that identifies a build |
+| `…Limit`, `…Loss` | money as a string with exactly two decimals, so it compares exactly |
+
+Plus filler values — `example`, `test`, `TODO`, `changeme`, `1.0.0.0`, the empty string — anywhere
+in the document.
+
+Anything whose name promises no particular form is **not** examined. An `alias` is free text and a
+`tool` is a name; the cost of a false accusation is a certificate wrongly refused, so these checks
+err toward silence. **An omitted field is never a violation** — rule 1 and rule 5 agree that absent
+is fine and decorative is not.
+
+**This one works on the certificate alone.** If somebody hands you a file and no ledger, the tool
+still runs it and prints what it found before telling you the claims cannot be recomputed. That is
+the moment a recipient has the least information and the most need.
+
 ## Seal continuity — what the tool derives that the certificate never claims
 
 Every run prints a **SEAL CONTINUITY** block. Nothing in it comes from the certificate: it is
