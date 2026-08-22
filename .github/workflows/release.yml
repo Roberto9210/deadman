@@ -65,6 +65,15 @@ jobs:
           # distribution is deadman-kit -> artifact stems are deadman_kit-<version>* (PEP 427/625 normalisation)
           test -f "dist/deadman_kit-${{ needs.check-version.outputs.version }}.tar.gz"
           test -f "dist/deadman_kit-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+      - name: The description about to be frozen on PyPI must not be stale
+        # A PyPI description CANNOT be edited after publication - only a new release replaces it.
+        # 0.2.0 shipped a README telling readers the tool was "not on PyPI yet" and to clone
+        # instead; a cold-start run showed that is where a reasonable reader gives up, because it
+        # is the first thing they read and it is visibly false against the install they just did.
+        # This gate is deliberately on the RELEASE and not on commits: main may be mid-repair,
+        # but a published page that contradicts the package is permanent.
+        run: python scripts/check_published_description.py "dist/deadman_kit-${{ needs.check-version.outputs.version }}-py3-none-any.whl"
+
       - name: Clean venv, --no-deps, neutral cwd, import + smoke
         shell: bash
         run: |

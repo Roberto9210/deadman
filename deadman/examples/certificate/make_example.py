@@ -5,7 +5,7 @@ owning a guardian and without trusting us to hand them an honest one. They are s
 but built with the real hashing rules, so the chain in `ledger.jsonl` is a real chain and
 the hashes in the certificates are real hashes.
 
-    python examples/certificate/make_example.py
+    python deadman/examples/certificate/make_example.py
 
 `tests/test_c_certificate_example.py` runs the shipped files on every test run, so this
 example cannot rot into a lie about what the tool does - including a check that these exact

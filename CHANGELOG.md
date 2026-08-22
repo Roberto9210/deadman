@@ -9,6 +9,42 @@ visible with its reason), then builds sdist + wheel with `python -m build`, inst
 then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
 `release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`.
 
+## 0.2.1 — 2026-08-22
+
+**Everything here came from one cold-start run**: a stranger's path, in a fresh virtualenv outside
+the repository, installing only from PyPI and reading only published pages. It took 2 minutes 26
+seconds to verify a certificate arriving via GitHub — and did not complete at all arriving via
+PyPI, which is where `pip install` sends people. The log is published at
+[`docs/COLD_START_LOG.md`](https://github.com/Roberto9210/deadman/blob/main/docs/COLD_START_LOG.md),
+including the point where a reasonable reader gives up.
+
+- **`python -m deadman.verify_certificate --example`** — verifies a certificate **that ships
+  inside the package**. No files to find, no download, no network, no GitHub. The first useful
+  command now works ten seconds after installing. It ends by printing where the other three
+  examples live, as an absolute URL.
+- **The worked examples ship.** They lived at the repository root, the README said they "ship",
+  and the wheel contained none of them. They now live in `deadman/examples/certificate/` and are
+  packaged — one canonical copy, so there is nothing to drift.
+- **The trust layers are explained in the README itself**, not behind a link. `REACHED L1` is the
+  headline of every run and the published 0.2.0 page contained the string `L1` zero times. The
+  table says what L1, L2 and L3 prove, and states plainly that **L1 alone does not survive an
+  attacker with disk access**.
+- **Every relative link in the README is now absolute.** PyPI renders the description on
+  pypi.org, where `docs/verify-certificate.md` reaches nothing. Thirty-six links were relative.
+- **The "no ledger" message says what to do.** It used to end one sentence early: accurate, and
+  silent about the only possible next action. It now explains what a ledger is to someone who has
+  never heard the word, and says to ask whoever handed over the certificate for it.
+- **`--help` no longer cites specification identifiers** (`C12/C13`) that a reader cannot look up,
+  and defines L1/L2/L3 where it names them.
+- **A release gate**: `scripts/check_published_description.py` inspects the built wheel's own
+  metadata and refuses to publish a description containing stale claims (`not on PyPI yet`,
+  `coming soon`, …) or relative markdown links. Run from `release.yml`, deliberately not from the
+  test suite: `main` may be mid-repair, but **a PyPI description cannot be edited after
+  publication** — only a new release replaces it, which is what 0.2.1 is.
+
+Nothing about the verification logic changed. A certificate that verified under 0.2.0 verifies
+identically here.
+
 ## 0.2.0 — 2026-08-21
 
 Adds a **verifiable session certificate verifier**: the part a third party runs to *disprove* a

@@ -8,7 +8,7 @@ examples kept teaching the old shape - including a `buildHash` of "example", a c
 fails CERT_SPEC rule 5's own question: *what does it distinguish?*
 
 Fixing those by hand would guarantee a repeat at the next emitter change. So the rules are
-asserted here instead, over whatever JSON happens to be in examples/certificate/.
+asserted here instead, over whatever JSON happens to be in deadman/examples/certificate/.
 
 The coverage assertion at the bottom is the one worth defending: the published set must show
 BOTH what the emitter produces when it knows a value AND what it produces when it does not,
@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-EX = ROOT / "examples" / "certificate"
+EX = ROOT / "deadman" / "examples" / "certificate"
 
 #: Values that look like content and carry none. Compared as whole values, case-insensitively,
 #: so a self-describing alias like "example-trader" is fine while a bare "example" is not.
@@ -42,7 +42,7 @@ BUILD_HASH_FORM = re.compile(r"^[0-9a-f]{16}$")
 
 def _certificates():
     files = sorted(EX.glob("certificate*.json"))
-    assert files, "no example certificates found - has examples/certificate/ moved?"
+    assert files, "no example certificates found - has deadman/examples/certificate/ moved?"
     return [(f.name, json.loads(f.read_text(encoding="utf-8"))) for f in files]
 
 
@@ -316,7 +316,7 @@ def test_the_documented_build_hash_preimage_actually_produces_it():
 
 def test_the_examples_readme_exists_and_says_they_are_synthetic():
     readme = EX / "README.md"
-    assert readme.exists(), "examples/certificate/README.md is missing"
+    assert readme.exists(), "deadman/examples/certificate/README.md is missing"
     text = readme.read_text(encoding="utf-8").lower()
     assert "synthetic" in text or "fabricated" in text
     assert "not a real" in text or "no real" in text

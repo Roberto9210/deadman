@@ -1,4 +1,4 @@
-"""The worked example in examples/certificate/ is checked in, and documentation that drifts
+"""The worked example in deadman/examples/certificate/ is checked in, and documentation that drifts
 from the code is worse than none - a reader who runs the command and gets different output
 learns to distrust the whole repository. So the shipped files are verified on every run, and
 the exact strings quoted in docs/verify-certificate.md are asserted here.
@@ -19,7 +19,7 @@ from deadman.verify_certificate import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-EX = ROOT / "examples" / "certificate"
+EX = ROOT / "deadman" / "examples" / "certificate"
 
 
 def _subprocess_env():
@@ -42,7 +42,7 @@ def _cert(name):
 def test_the_shipped_example_files_exist():
     for name in ("ledger.jsonl", "certificate.json", "certificate-tampered.json",
                  "certificate-truncated.json", "make_example.py"):
-        assert (EX / name).exists(), f"examples/certificate/{name} is missing"
+        assert (EX / name).exists(), f"deadman/examples/certificate/{name} is missing"
 
 
 def test_the_honest_example_verifies():
@@ -204,3 +204,41 @@ def test_the_generator_reproduces_the_checked_in_files(tmp_path):
     assert r.returncode == 0, r.stderr
     for name, original in before.items():
         assert (EX / name).read_bytes() == original, f"{name} is not reproducible from the script"
+
+
+def test_the_example_flag_works_with_no_files_and_no_network(tmp_path):
+    """The cold-start fix: a reader who just ran `pip install` has nothing to verify. This must
+    work from a directory containing nothing, reading only what the package itself carries."""
+    r = subprocess.run(
+        [sys.executable, "-m", "deadman.verify_certificate", "--example"],
+        capture_output=True, text=True, cwd=str(tmp_path), env=_subprocess_env())
+
+    assert r.returncode == EXIT_OK, r.stdout + r.stderr
+    assert "RESULT: VERIFIED at L1 (exit 0)." in r.stdout
+    assert "runs entirely offline" in r.stdout
+    # It must hand the reader somewhere to go next, with a URL that works off pypi.org.
+    assert "https://github.com/Roberto9210/deadman/tree/main/deadman/examples/certificate" in r.stdout
+    assert not list(tmp_path.iterdir()), "--example must not write anything"
+
+
+def test_the_missing_ledger_message_says_what_to_do(tmp_path):
+    """It used to end one sentence early - accurate, and silent about the only possible next
+    action. A stranger handed a certificate has never heard the word 'ledger'."""
+    r = subprocess.run(
+        [sys.executable, "-m", "deadman.verify_certificate", str(EX / "certificate.json")],
+        capture_output=True, text=True, cwd=str(tmp_path), env=_subprocess_env())
+
+    assert r.returncode == EXIT_UNEVALUABLE
+    assert "WHAT TO DO" in r.stderr
+    assert "ask whoever gave you the certificate" in r.stderr
+    assert "append-only record" in r.stderr, "it must explain what a ledger is, not just name it"
+
+
+def test_help_cites_no_specification_identifiers_a_reader_cannot_look_up():
+    r = subprocess.run([sys.executable, "-m", "deadman.verify_certificate", "--help"],
+                       capture_output=True, text=True, cwd=str(ROOT), env=_subprocess_env())
+    assert r.returncode == 0
+    assert "C12" not in r.stdout and "C13" not in r.stdout
+    for layer in ("L1", "L2", "L3"):
+        assert layer in r.stdout
+    assert "does NOT survive an attacker with disk access" in r.stdout

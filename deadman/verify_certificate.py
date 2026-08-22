@@ -52,6 +52,11 @@ EXIT_OK = 0
 EXIT_CONTRADICTED = 1
 EXIT_UNEVALUABLE = 2
 
+#: Where the full set of worked examples lives. ABSOLUTE on purpose: this string is
+#: printed by --example and also appears in the README, whose relative links do not
+#: resolve from the PyPI project page.
+REPO_EXAMPLES = "https://github.com/Roberto9210/deadman/tree/main/deadman/examples/certificate"
+
 
 def canonical_json(obj: Mapping[str, Any]) -> bytes:
     """The one canonicalisation both ledger dialects share: ordinal-sorted keys, no
@@ -822,23 +827,89 @@ def _days_between(a: str, b: str) -> list[str]:
 # The door
 # --------------------------------------------------------------------------------------
 
+def _packaged_example() -> tuple:
+    """The certificate and ledger that ship inside this package.
+
+    A cold-start run found that a reader who installed from PyPI had nothing to verify: the
+    examples lived at the repository root, the README linked to them relatively - which does not
+    resolve from the PyPI page - and the wheel contained none of them. `--example` exists so the
+    first useful command needs no download, no GitHub, and no network.
+    """
+    try:
+        from importlib.resources import files
+        base = files("deadman") / "examples" / "certificate"
+        cert = json.loads((base / "certificate.json").read_text(encoding="utf-8"))
+        entries = [json.loads(line) for line
+                   in (base / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+                   if line.strip()]
+        return cert, entries
+    except (OSError, ModuleNotFoundError, ValueError) as e:
+        raise RuntimeError(f"the packaged example could not be read: {e}") from e
+
+
+def _run_example() -> int:
+    try:
+        cert, entries = _packaged_example()
+    except RuntimeError as e:
+        print(f"COULD NOT EVALUATE - {e}", file=sys.stderr)
+        return EXIT_UNEVALUABLE
+
+    print("Verifying the example certificate that ships with this package.")
+    print("Nothing is downloaded; this runs entirely offline.")
+    print()
+    rep = verify_certificate(cert, entries)
+    print(rep.render())
+    print()
+    print("That certificate is honest, so it passes. Three more ship beside it - one with a")
+    print("falsified claim, one that lies by declaring a shorter range, and one whose issuer")
+    print("fields are omitted because the emitter could not determine them:")
+    print(f"    {REPO_EXAMPLES}")
+    print()
+    print("To check a real certificate you need two files: the certificate, and the ledger it")
+    print("says it covers. Then:  python -m deadman.verify_certificate certificate.json ledger.jsonl")
+    return rep.exit_code
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m deadman.verify_certificate",
         description="Verify a deadman session certificate against its ledger. "
                     "Recomputes every claim from the events; never trusts the document.",
-        epilog="exit 0 = verified, 1 = contradicted, 2 = could not evaluate",
+        epilog="Trust layers: L1 the ledger's own hash chain recomputes - which does NOT "
+               "survive an attacker with disk access; L2 adds a third party's anchor, so the "
+               "record is dated by someone other than the trader; L3 adds the issuer's "
+               "signature, which proves origin and never truth.\n"
+               "Exit codes: 0 = verified, 1 = contradicted, 2 = could not evaluate.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("certificate", type=Path, help="the certificate JSON")
+    p.add_argument("certificate", type=Path, nargs="?",
+                   help="the certificate JSON")
     p.add_argument("ledger", type=Path, nargs="?", help="the ledger .jsonl it claims to cover")
     p.add_argument("--anchors", type=Path,
-                   help="JSON list of third-party anchors [{seq, hash, ...}] - reaches L2")
+                   help="JSON list of third-party anchors [{seq, hash, ...}]. Reaches L2: proof "
+                        "from someone other than the trader that the ledger existed before a "
+                        "point in time")
     p.add_argument("--pubkey", type=Path,
-                   help="PEM Ed25519 public key of the issuer - reaches L3")
+                   help="PEM Ed25519 public key of the issuer. Reaches L3: proof the document "
+                        "came from the holder of that key and was not edited afterwards")
     p.add_argument("--series", type=Path, nargs="+", metavar="CERT",
-                   help="additional certificates: check the links between days (C12/C13)")
+                   help="additional certificates covering other days: checks that the chain "
+                        "between days is unbroken and that any missing day is declared")
+    p.add_argument("--example", action="store_true",
+                   help="verify the example certificate that ships with this package and exit; "
+                        "needs no files, no download and no network")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args(argv)
+
+    if args.example:
+        return _run_example()
+
+    if args.certificate is None:
+        p.print_usage(sys.stderr)
+        print("\nCOULD NOT EVALUATE - no certificate given. To see this tool work on a "
+              "certificate that ships with it, run:\n"
+              "    python -m deadman.verify_certificate --example", file=sys.stderr)
+        return EXIT_UNEVALUABLE
 
     try:
         cert = _read_json(args.certificate)
@@ -860,7 +931,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return srep.exit_code
 
     if args.ledger is None:
-        print("COULD NOT EVALUATE - no ledger given; the certificate cannot judge itself",
+        # The cold-start run stopped here. The message was accurate and ended one sentence early:
+        # it never said what to do next, and "ledger" means nothing to someone who has just been
+        # handed a certificate by a stranger.
+        print("COULD NOT EVALUATE - no ledger given; the certificate cannot judge itself.\n"
+              "\n"
+              "A certificate is a summary. The ledger is the append-only record of what actually\n"
+              "happened - every event, hash-chained - and this tool recomputes the summary from it\n"
+              "rather than believing it. Without the ledger there is nothing to check against.\n"
+              "\n"
+              "WHAT TO DO: ask whoever gave you the certificate for the ledger file it covers\n"
+              "(usually ledger.jsonl). A certificate handed over without its ledger cannot be\n"
+              "verified by anyone, including us. Then run:\n"
+              "    python -m deadman.verify_certificate certificate.json ledger.jsonl\n"
+              "\n"
+              "To see the tool work meanwhile:\n"
+              "    python -m deadman.verify_certificate --example",
               file=sys.stderr)
         return EXIT_UNEVALUABLE
 

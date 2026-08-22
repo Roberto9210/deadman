@@ -54,18 +54,18 @@ Concretely, in order:
 ## Try it right now, on files that ship with the package
 
 The repository carries a worked example so you can run the verifier before anyone hands you a
-real certificate. `examples/certificate/` holds one ledger and four certificates over it, one
+real certificate. `deadman/examples/certificate/` holds one ledger and four certificates over it, one
 lesson each: an honest one, one with a number quietly changed, one that lies by declaring a
 shorter range, and one whose emitter could not determine its own version and therefore **omits**
 those fields rather than defaulting them. The third is [its own section
 below](#the-attack-that-got-past-this-verifier), because it is the case this verifier was wrong
 about. All four are synthetic and say so — see
-[`examples/certificate/README.md`](../examples/certificate/README.md).
+[`deadman/examples/certificate/README.md`](../deadman/examples/certificate/README.md).
 
 ### 1. An honest certificate
 
 ```bash
-python -m deadman.verify_certificate examples/certificate/certificate.json examples/certificate/ledger.jsonl
+python -m deadman.verify_certificate deadman/examples/certificate/certificate.json deadman/examples/certificate/ledger.jsonl
 ```
 
 ```
@@ -231,7 +231,7 @@ designed; this one is the case the tool was wrong about, how it was wrong, and w
 fix. Run it yourself:
 
 ```bash
-python -m deadman.verify_certificate examples/certificate/certificate-truncated.json examples/certificate/ledger.jsonl
+python -m deadman.verify_certificate deadman/examples/certificate/certificate-truncated.json deadman/examples/certificate/ledger.jsonl
 ```
 
 ### The attack

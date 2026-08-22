@@ -83,7 +83,7 @@ sense — they *were* written from scratch a moment ago.
 ## Regenerating
 
 ```bash
-python examples/certificate/make_example.py
+python deadman/examples/certificate/make_example.py
 ```
 
 The committed bytes must come back out unchanged; `tests/test_c_certificate_example.py` checks
