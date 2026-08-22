@@ -194,6 +194,16 @@ Two honest limits, both printed rather than buried:
 - **An ungraceful exit has no measurable gap.** `GUARDIAN_STOPPED` is written on a clean shutdown
   and not on a crash or a kill, so the durations are **omitted with the reason stated** rather
   than guessed. The count of unclean shutdowns is reported instead, so neither path is silent.
+  Coverage is then published as a **lower bound**, because the moment the session ended is
+  genuinely unknown and picking the earliest possible one would read as a damning 0% for a day
+  that may have been spotless.
+- **A missing shutdown record is not evidence of anything on its own**, and the block says so
+  next to the number. A crash, a power cut, a ledger rotation that left the record in an earlier
+  segment, and a range that begins between a shutdown and its restart all look identical from
+  here. This is the only figure a reader can take as a charge, so it is the only one that may not
+  err toward accusing: the whole ledger is consulted before calling a start unpaired, and a
+  segment that simply does not begin at the beginning is reported as **undetermined**, never as
+  unclean.
 - **A `deadman-kit-v1` ledger cannot supply any of it.** That vocabulary has no process-lifecycle
   events at all, so the block says so instead of printing zeros — a zero would claim no restarts
   happened, which is a different statement from *this record cannot say*.

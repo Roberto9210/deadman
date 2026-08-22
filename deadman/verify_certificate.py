@@ -236,11 +236,34 @@ class CertReport:
             return out
 
         coverage = c.get("continuityCoverage")
-        out.append("  coverage        " + (f"{coverage * 100:.0f}% of the sealed period"
-                                           if coverage is not None else "not computable"))
+        if coverage is None:
+            out.append("  coverage        not computable from this range")
+        elif c.get("coverageIsLowerBound"):
+            out.append(f"  coverage        at least {coverage * 100:.0f}% of the sealed period - a "
+                       f"lower bound, because at least one")
+            out.append("                  session has no recorded shutdown and the moment it "
+                       "ended is therefore unknown")
+        else:
+            out.append(f"  coverage        {coverage * 100:.0f}% of the sealed period")
         out.append(f"  process starts  {c.get('processRestarts', 0)} after arming"
-                   + (f", {c['uncleanShutdowns']} of them following a session that ended without "
-                      f"a clean shutdown" if c.get("uncleanShutdowns") else ""))
+                   + (f", {c['uncleanShutdowns']} of them following a session with no recorded "
+                      f"clean shutdown" if c.get("uncleanShutdowns") else ""))
+        if c.get("uncleanShutdowns"):
+            # The only figure here a reader can take as a charge, so it carries the explanation it
+            # cannot rule out. A rotated ledger segment that no longer holds the GUARDIAN_STOPPED
+            # looks identical to a crash, and so does a range that begins between a shutdown and
+            # its restart. Saying that is honest; letting the count imply a crash is not.
+            out.append("                  a missing shutdown record is not by itself evidence of "
+                       "anything: a crash, a power cut, a")
+            out.append("                  ledger rotation that left the record in an earlier "
+                       "segment, and a range beginning between a")
+            out.append("                  shutdown and its restart all look the same from here, "
+                       "and this tool cannot tell them apart")
+        if c.get("indeterminateStarts"):
+            out.append(f"  undetermined    {c['indeterminateStarts']} further start(s) have "
+                       f"nothing at all before them in this record, so they")
+            out.append("                  are reported as undetermined rather than counted "
+                       "against anyone")
 
         if c.get("longestGapMs") is not None:
             longest, total = c["longestGapMs"], c.get("unmonitoredMs") or 0
@@ -470,6 +493,18 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
         opened = [e for e in outside_before if e.get(ev) == "DAY_OPENED" and day_of(e) == day]
         closed = [e for e in outside_after if e.get(ev) == "DAY_CLOSED" and day_of(e) == day]
         hidden = [e for e in outside_before + outside_after if e.get(ev) in _MATERIAL]
+
+        # A GUARDIAN_STARTED is not material in itself - ordinary restarts happen constantly and
+        # flagging them would make every honest early export a contradiction. An ORPHANED one is:
+        # it is the evidence of an ungraceful shutdown, and excluding it from the range is exactly
+        # how that evidence would be dropped from the continuity block.
+        # ...and only when it was cut off the FRONT. A restart that happened after the export
+        # is not hidden by the certificate, it merely postdates it - treating those as
+        # contradictions would call every honest mid-session export a liar, which is the same
+        # calibration mistake this check was written to avoid in the first place.
+        hidden += [e for e in outside_before
+                   if e.get(ev) == "GUARDIAN_STARTED"
+                   and _preceded_by_clean_stop(entries, dialect, e) is False]
         edge = closed[0] if closed else (opened[0] if opened else None)
 
         if edge is not None:
@@ -587,7 +622,7 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
     expiry = next((r for r in rows if r.get(ev) == "SEAL_EXPIRED"), None)
     basis = (expiry.get(dialect.f_payload) or {}).get("basis") if expiry else None
 
-    restarts = unclean = 0
+    restarts = unclean = indeterminate = 0
     gaps: list = []
     open_stop: Optional[str] = None
     continuity_ms = 0
@@ -608,7 +643,26 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
         elif name == "GUARDIAN_STARTED":
             # The first start of a fresh process, before anything was armed, is a boot and not a
             # restart. Counting it inflated every quiet day by one.
+            #
+            # It is also where a declared range can FABRICATE an accusation. If the range begins
+            # between a GUARDIAN_STOPPED and its GUARDIAN_STARTED, that start is orphaned by the
+            # cut and not by a crash - the truncated-range attack pointed the other way, making a
+            # clean shutdown look unclean. So the full ledger is consulted, not just the range,
+            # and when it cannot settle the question the answer is `indeterminate`, never
+            # `unclean`. This is the only number here a reader can take as a charge, so it is the
+            # only one that may not err toward accusing.
             if not armed_seen:
+                # Only starts after a seal has ever existed can be restarts OF a sealed session.
+                #
+                # The distinction that matters here is a genuine first boot versus a file that
+                # simply does not begin at the beginning. Start() marks the first case: it writes
+                # `fresh: true` when there was no state to restore. A start with nothing before it
+                # in this file and NO such mark is a record whose earlier part is elsewhere - a
+                # rotated segment - and that is undetermined, not a crash.
+                if (not _any_seal_before(entries, dialect, r)
+                        and _preceded_by_clean_stop(entries, dialect, r) is None
+                        and not (r.get(dialect.f_payload) or {}).get("fresh")):
+                    indeterminate += 1
                 last_seen = when or last_seen
                 continue
             restarts += 1
@@ -616,10 +670,18 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
                 gaps.append(_ms_between(open_stop, when))
                 open_stop = None
             else:
-                # No GUARDIAN_STOPPED preceded this start. Stop() is what writes it, and Stop()
-                # does not run on a crash, a kill, or a power cut - so the previous session ended
-                # without a clean shutdown and the gap has no measurable beginning.
-                unclean += 1
+                # No GUARDIAN_STOPPED preceded this start IN RANGE. Before calling that unclean,
+                # look at the whole ledger: the pairing may simply fall outside the declared range.
+                paired = _preceded_by_clean_stop(entries, dialect, r)
+                if paired is True:
+                    pass                       # cleanly paired outside the range; not an offence
+                elif paired is None:
+                    indeterminate += 1         # nothing precedes it at all; unknowable
+                else:
+                    # Stop() is what writes GUARDIAN_STOPPED and does not run on a crash, a kill
+                    # or a power cut, so the previous session ended without a clean shutdown and
+                    # the gap has no measurable beginning.
+                    unclean += 1
                 if continuous_since is not None:
                     # Count coverage only up to the last moment there is evidence of life.
                     continuity_ms += _ms_between(continuous_since, last_seen) or 0
@@ -634,15 +696,24 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
     if armed_ms and armed_ms > 0:
         coverage = max(0.0, min(1.0, continuity_ms / armed_ms))
 
+    # When a session ended with no recorded shutdown, the moment it died is unknown, so the
+    # covered fraction lies somewhere between "up to the last proof of life" and "right up to the
+    # restart". Reporting the first as if it were the answer picks the worst end of an unknown
+    # range and reads as a damning 0% for a day that may have been spotless. It is published as a
+    # LOWER BOUND instead, and labelled as one.
+    coverage_is_lower_bound = bool(unclean or indeterminate)
+
     measured = [g for g in gaps if g is not None]
     out = {
         "supported": True,
+        "indeterminateStarts": indeterminate,
         "armedMs": armed_ms,
         "dayClosed": day_closed,
         "sealExpiryBasis": basis,
         "processRestarts": restarts,
         "uncleanShutdowns": unclean,
         "continuityCoverage": coverage,
+        "coverageIsLowerBound": coverage_is_lower_bound,
     }
 
     # The partition that leaves no path silent: a clean shutdown yields a measurable gap; an
@@ -658,6 +729,40 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
         out["unmonitoredMs"] = sum(measured) if measured else 0
         out["longestGapMs"] = max(measured) if measured else 0
     return out
+
+
+def _any_seal_before(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
+                     entry: Mapping[str, Any]) -> bool:
+    """Had a seal ever been created before this entry, anywhere in the ledger? A start before the
+    first SEAL_CREATED is a boot, not a restart of anything sealed."""
+    seqf, ev = dialect.f_seq, dialect.f_event
+    seq = entry.get(seqf)
+    if not isinstance(seq, int):
+        return False
+    return any(e.get(ev) == "SEAL_CREATED" and isinstance(e.get(seqf), int) and e[seqf] < seq
+               for e in entries)
+
+
+def _preceded_by_clean_stop(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
+                            start_entry: Mapping[str, Any]):
+    """Was this GUARDIAN_STARTED preceded by a clean GUARDIAN_STOPPED, anywhere in the ledger?
+
+    True  - yes, so it is an ordinary restart even if the pairing lies outside the declared range.
+    False - no, and something else does precede it: the previous session ended ungracefully.
+    None  - nothing precedes it in this file at all, so the question cannot be answered here. A
+            rotated ledger segment looks exactly like this, and so does a genuine first boot.
+    """
+    seqf, ev = dialect.f_seq, dialect.f_event
+    seq = start_entry.get(seqf)
+    if not isinstance(seq, int):
+        return None
+
+    earlier = [e for e in entries
+               if isinstance(e.get(seqf), int) and e[seqf] < seq]
+    if not earlier:
+        return None
+    earlier.sort(key=lambda e: e[seqf])
+    return earlier[-1].get(ev) == "GUARDIAN_STOPPED"
 
 
 def find_backwards_timestamps(entries: Sequence[Mapping[str, Any]], dialect: Dialect,

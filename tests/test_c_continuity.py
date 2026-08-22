@@ -24,8 +24,8 @@ from __future__ import annotations
 import json
 
 from deadman.verify_certificate import (
-    DEADMAN_KIT_V1, GUARDIAN_CORE_V1, find_backwards_timestamps, recompute_continuity,
-    verify_certificate,
+    DEADMAN_KIT_V1, EXIT_CONTRADICTED, GUARDIAN_CORE_V1, find_backwards_timestamps,
+    recompute_continuity, verify_certificate,
 )
 
 from test_c_certificate import QUIET_DAY, kledger, make_cert
@@ -242,3 +242,85 @@ def test_process_restarts_never_appears_without_its_context():
     assert "process starts" in block
     assert "time with no guardian running" in block
     assert "Restarts happen for Windows updates" in block
+
+
+# ---------------------------------------------------------------- the edge of the declared range
+
+def test_a_range_starting_after_a_clean_shutdown_does_not_invent_an_unclean_one():
+    """The truncated-range attack in reverse. Before, a short range HID a breach; here it would
+    FABRICATE one. uncleanShutdowns counts a GUARDIAN_STARTED with no GUARDIAN_STOPPED before it,
+    and a range boundary can orphan a start that was cleanly paired outside it.
+
+    This is the only figure in the block a reader can take as a charge, so it is the only one that
+    must never err toward accusing."""
+    entries = led([
+        ("GUARDIAN_STARTED", "12:00:00", {}),
+        ("ARMED", "12:05:00", {}),
+        ("SEAL_CREATED", "12:05:01", {}),
+        ("GUARDIAN_STOPPED", "12:30:00", {"state": "ARMED"}),   # a clean shutdown, seq 4
+        ("GUARDIAN_STARTED", "12:30:20", {"state": "ARMED"}),   # its pair, seq 5
+        ("DAY_OPENED", "12:31:00", {"dayKey": "2026-08-19"}),
+        ("DAY_CLOSED", "17:00:00", {"dayKey": "2026-08-19"}),
+    ])
+    # A certificate covering seq 5..7 - the start is inside, its STOPPED is not.
+    c = recompute_continuity(entries, GUARDIAN_CORE_V1, 5, 7)
+    assert c["uncleanShutdowns"] == 0, (
+        "a clean shutdown just outside the range was reported as an unclean one")
+
+
+def test_when_the_ledger_cannot_show_what_preceded_the_range_it_says_so_instead_of_accusing():
+    """If nothing at all precedes the range, the tool genuinely cannot tell a clean shutdown from
+    a crash - and unknown must read as unknown, never as the accusing option."""
+    # A rotated segment: the file begins mid-story, with a start that restored existing state
+    # rather than booting fresh. Its shutdown record is in an earlier segment.
+    rotated = led([
+        ("GUARDIAN_STARTED", "12:30:20", {"state": "ARMED"}),      # no `fresh` marker
+        ("SEAL_CREATED", "12:31:00", {}),
+        ("DAY_CLOSED", "17:00:00", {"dayKey": "2026-08-19"}),
+    ])
+    c = recompute_continuity(rotated, GUARDIAN_CORE_V1, 1, 3)
+    assert c["uncleanShutdowns"] == 0, "a rotated segment must never be called an unclean exit"
+    assert c["indeterminateStarts"] == 1
+
+    # And the opening of an ordinary ledger, which Start() marks `fresh`, is neither.
+    booted = led([
+        ("GUARDIAN_STARTED", "12:30:20", {"state": "DISARMED", "fresh": True}),
+        ("SEAL_CREATED", "12:31:00", {}),
+        ("DAY_CLOSED", "17:00:00", {"dayKey": "2026-08-19"}),
+    ])
+    fresh = recompute_continuity(booted, GUARDIAN_CORE_V1, 1, 3)
+    assert fresh["indeterminateStarts"] == 0, (
+        "a genuine first boot must not be reported as undetermined - that would put an "
+        "unexplained line on every certificate ever issued")
+
+
+def test_a_truncated_range_cannot_hide_a_real_unclean_shutdown():
+    """The other direction. Setting the range to begin after the orphaned start would drop it from
+    the count - so the range check has to catch that the certificate no longer covers its day."""
+    entries = led([
+        ("GUARDIAN_STARTED", "12:00:00", {}),
+        ("ARMED", "12:05:00", {}),
+        ("SEAL_CREATED", "12:05:01", {}),
+        ("DAY_OPENED", "12:05:02", {"dayKey": "2026-08-19"}),
+        ("GUARDIAN_STARTED", "16:00:00", {"state": "ARMED"}),   # unclean: no STOPPED before it
+        ("DAY_CLOSED", "17:00:00", {"dayKey": "2026-08-19"}),
+    ])
+    honest = recompute_continuity(entries, GUARDIAN_CORE_V1, 1, 6)
+    assert honest["uncleanShutdowns"] == 1, "the honest range must see it"
+
+    liar = make_cert(entries[5:], day="2026-08-19", lo=6)   # declares 6..6, dropping the orphan
+    rep = verify_certificate(liar, entries)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "RANGE_TRUNCATED" in {f.code for f in rep.contradictions}
+
+
+def test_the_block_says_a_rotated_segment_looks_the_same_as_an_unclean_exit():
+    """A rotated ledger segment that no longer carries the GUARDIAN_STOPPED is indistinguishable
+    from a crash. Saying so is honest; letting the count imply a crash is not."""
+    entries = led(ARMED_OPENING + [
+        ("GUARDIAN_STARTED", "17:39:00", {"state": "ARMED"}),
+        ("DAY_CLOSED", "17:39:02", {"dayKey": "2026-08-19"}),
+    ])
+    block = verify_certificate(make_cert(entries), entries).render().split("SEAL CONTINUITY")[1]
+    assert "rotation" in block.lower() or "rotated" in block.lower(), (
+        "the block must name ledger rotation as an explanation it cannot rule out")
