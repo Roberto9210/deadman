@@ -60,6 +60,26 @@ la misma cadena (`:1524`), donde un consumidor automático la parsea como dato.
 **La prueba para aplicarla:** de cada cosa impresa junto a un veredicto, preguntar *¿esto lo
 comprobé, o lo estoy transcribiendo?* Lo transcripto va en otro lado, o no va.
 
+## Dos implementaciones que adivinaron igual no se corroboran
+
+**Dos implementaciones independientes de la misma regla equivocada siempre coinciden, y su
+coincidencia se lee como corroboración.**
+
+La coincidencia entre dos implementaciones **sólo es evidencia si fueron derivadas
+independientemente**. Cuando no hay documento del cual derivarlas, lo único que comparten es el
+supuesto — y cruzarlas prueba que las dos leyeron lo mismo, no que el mundo sea así.
+
+**Caso que la originó (2026-09-01):** el certificado publica `triggerEvent` como la causa de un
+episodio. El verificador la deriva tomando el evento anterior (`verify_certificate.py:974-982`) y
+el emisor **también** (`deadman-guardian` `Certificate.cs:238`, leído en el commit `66dee69`). Un
+test que compare los dos pasaría siempre, sobre todo certificado, sin comprobar nada sobre la
+causa real.
+
+**Cómo se aplica:** antes de usar «los dos lados coinciden» como evidencia, preguntar *¿de qué
+documento derivó cada uno?* Si es «de ninguno», el acuerdo es un hecho sobre las implementaciones,
+no sobre el mundo. Mientras no exista la especificación compartida, todo acuerdo entre este repo y
+`deadman-guardian` se reporta como **consistente**, nunca como **corroborado**.
+
 ## Método, en corto
 
 - **Verificar contra el código real antes de afirmar.** Un hallazgo no verificado no es un hecho, y

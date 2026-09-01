@@ -4,6 +4,8 @@
 >
 > ### Un documento faltante no produce un hueco visible. Produce dos decisiones locales coherentes, incompatibles entre sí, y ninguna reconocible como el error.
 >
+> ### Sin especificación, los dos lados adivinaron. Adivinaron igual. Y su acuerdo parece confirmación.
+>
 > Por eso una especificación ausente **no se detecta revisando código**: no hay nada mal escrito de
 > ningún lado. Los dos tratamientos opuestos de `keyId` eran razonables, y ninguno de los dos lados
 > se equivocó. **El error no vive en ninguna de las dos decisiones — vive entre ellas, y sólo se ve
@@ -262,6 +264,25 @@ en el camino peligroso. Por eso renombrar es la corrección disponible, no un pa
 **2. Compararlo contra el ledger.**
 Arregla **la falta de evidencia**: el único campo del bloque de episodios que nadie verifica es
 justamente el que asigna culpa. **Eso es indefendible en un artefacto de evidencia.**
+
+> **CORRECCIÓN DEL RULING (2026-09-01), después de leer la fuente primaria.** Este ruling decía
+> «renombrar Y comparar» y presentaba la comparación como lo que vuelve verdadero el documento.
+> **Era insuficiente.** `Certificate.cs:238` del guardián hace `current.TriggerEvent = prevEv`: el
+> emisor deriva la causa por adyacencia **con la misma regla que el verificador**.
+>
+> **La comparación PASARÍA HOY, sobre todos los certificados, y eso no significa nada.** No
+> comprobaría que la causa es cierta: comprobaría que los dos lados cometen el mismo error. Un
+> emisor y un verificador que computan el mismo campo con la misma regla equivocada **nunca se
+> contradicen**.
+>
+> **La comparación se queda — es necesaria**, porque impide que el campo sea texto libre y cierra
+> la mitad «cualquiera puede escribir cualquier cosa». **Pero NO es lo que hace verdadero al
+> documento y no se vende como si lo fuera.** Lo que lo hace verdadero es el **renombre a
+> `precedingEvent`** —que deja de afirmar causalidad— y la **limitación que declara que el
+> certificado no establece causas** (parte 3).
+>
+> **Anotado explícitamente para quien implemente:** cuando el test de comparación pase, eso **no**
+> es evidencia de nada hasta que las dos derivaciones sean independientes. Ver §5.11.
 
 **3. El certificado tiene que DECLARAR que no establece causas.**
 
@@ -1094,6 +1115,37 @@ Tiene una gemela que hay que cerrar con ella:
 
 La prueba para el que aplique la regla, en su forma completa: *¿este cambio —agregar o quitar—
 hace que algo se verifique MENOS y el documento no lo diga? Entonces no va.*
+
+---
+
+## 5.11 — RULING — dos implementaciones que adivinaron igual no se corroboran
+
+> **DOS IMPLEMENTACIONES INDEPENDIENTES DE LA MISMA REGLA EQUIVOCADA SIEMPRE COINCIDEN, Y SU
+> COINCIDENCIA SE LEE COMO CORROBORACIÓN.**
+
+Es la **verificación cómplice un piso más arriba**: allá un test compartía la idea de quien lo
+escribió; acá **dos SISTEMAS comparten un malentendido**. Cruzarlos no prueba nada sobre el mundo
+— prueba que los dos leyeron lo mismo.
+
+> **La coincidencia entre dos implementaciones sólo es evidencia si fueron derivadas
+> INDEPENDIENTEMENTE. Cuando no hay documento del cual derivarlas, lo único que comparten es el
+> supuesto.**
+
+Y de ahí el enlace con §6, que es la parte que cambia cómo se lee todo acuerdo entre los dos lados:
+
+> **Sin especificación, los dos lados adivinaron. Adivinaron igual. Y su acuerdo parece
+> confirmación.**
+
+**Cómo se aplica.** Antes de usar «los dos lados coinciden» como evidencia, preguntar: *¿de qué
+documento derivó cada uno su implementación?* Si la respuesta es «de ninguno» o «uno miró al otro»,
+el acuerdo es un hecho sobre las dos implementaciones, **no sobre el mundo**, y se reporta así.
+Un test de conformidad entre emisor y verificador vale exactamente lo que valga la independencia de
+sus derivaciones — y esa independencia la produce la especificación, no el cuidado de quien
+programa.
+
+**Corolario incómodo:** mientras §6 no exista, **todo acuerdo entre `deadman` y `deadman-guardian`
+tiene este descuento aplicado.** No los invalida; los degrada de «corroborado» a «consistente», que
+es una palabra distinta y más chica.
 
 ---
 
