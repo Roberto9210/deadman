@@ -1,14 +1,23 @@
-# Cómo se extiende el ledger — dos defectos vivos, y la regla que va encima
+# Cómo se extiende el ledger — cuatro defectos vivos, y la regla que va encima
+
+> **La pregunta tiene dos mitades y este documento contesta las dos.** La aditiva —¿admite el
+> formato un campo o un evento que no conoce?— es §5.1-§5.6. La **sustractiva** —¿admite que una
+> clave que sí conoce FALTE?— es §5.8, y la respuesta es distinta, porque **un campo desconocido es
+> inerte y una clave ausente puede APAGAR UN CHEQUEO.**
 
 **De:** la sesión de `deadman` (la librería)
-**Asunto:** dos defectos en la verificación de evidencia, y la regla de extensión del ledger
+**Asunto:** cuatro defectos en la verificación de evidencia, y la regla de extensión del ledger
+(mitad aditiva y mitad sustractiva)
 **Estado:** los defectos son hallazgos medidos, no propuestas. **Todo lo marcado RULING está
-DECIDIDO por el operador el 2026-08-31** — la salida de DEF-1, la de DEF-2, la regla de extensión
-(§5) y el orden de trabajo (§8). Nada está implementado todavía, en ningún lado.
+DECIDIDO por el operador** — la salida de DEF-1, la de DEF-2, §5.3, §5.4, §5.6, §5.7 y el orden de
+trabajo (§8), el 2026-08-31. La única excepción es §5.8, marcada RULING PROPUESTO: es la mitad
+sustractiva, llegó después y todavía no está ratificada. Nada está implementado, en ningún lado.
 
-Sale de tres pedidos del lado del guardián — un evento nuevo (acuse de recibo), el `buildHash` en
-`GUARDIAN_STARTED`, y el `dayKey` en `CONFIG_LOADED`. Buscando si el formato los admitía
-aparecieron dos defectos que no dependen de esos pedidos y que hay que arreglar antes.
+Sale de cuatro pedidos del lado del guardián. Tres son ADITIVOS — un evento nuevo (acuse de
+recibo), el `buildHash` en `GUARDIAN_STARTED`, el `dayKey` en `CONFIG_LOADED` — y el cuarto va en
+dirección contraria: **seis sitios con `?? ""` cuyo arreglo correcto es OMITIR la clave.**
+Buscando si el formato los admitía aparecieron cuatro defectos que no dependen de esos pedidos y
+que hay que arreglar antes.
 
 Todo se midió contra el código real y el ejemplo empaquetado (`deadman/examples/certificate/`),
 cada caso con su control, para que un resultado que pasa se sepa capaz de fallar. Donde no
@@ -20,15 +29,24 @@ digo del emisor sale del ejemplo empaquetado en *este* repo y de
 
 ---
 
-# PARTE I — LOS DOS DEFECTOS
+# PARTE I — LOS CUATRO DEFECTOS
 
-Ambos van **antes** de la regla de extensión. Tienen prioridad por ejes distintos y conviene no
-fingir un único orden:
+Los cuatro van **antes** de la regla de extensión. Tienen prioridad por ejes distintos y conviene
+no fingir un único orden:
 
 | | eje | ¿necesita un atacante? | ¿bloquea la regla? |
 |---|---|---|---|
 | **DEF-2** atribución de causa por adyacencia | emite afirmaciones falsas **hoy**, en operación normal | **no** | no, pero bloquea el pedido 1 |
 | **DEF-1** el campo top-level que nadie firma | rompe la propiedad que da valor al producto entero | sí (acceso a disco) | **sí** |
+| **DEF-4** omitir `session.dayKey` apaga el chequeo de truncamiento | **desactiva en silencio** la protección contra la mentira más peligrosa del formato | no — basta con **omitir** | no, pero decide §5.8 |
+| **DEF-3** la regla 5 lee claves de datos como nombres de campo | acusa en falso a contenido honesto | no — basta con **nombrar** un evento | no |
+
+DEF-3 hoy **no muerde**: barrí el vocabulario entero y no hay colisiones. Pero no muerde por
+suerte, no por diseño, y la suerte no escala. Va con prioridad menor y con la prueba que la cierra.
+
+**DEF-4 es urgente por coincidencia de calendario**, no por gravedad intrínseca: el emisor está por
+limpiar seis `?? ""` reemplazándolos por omisión, y **uno de los campos de ese mismo objeto no se
+puede omitir sin desarmar una protección.** Si la limpieza sale antes que la regla, sale mal.
 
 **Si sólo se puede uno primero: DEF-2.** No necesita adversario, ya está produciendo atribuciones
 falsas, y es el más barato de arreglar. DEF-1 es el que impide *escribir* la regla, porque la regla
@@ -235,6 +253,140 @@ que el emisor la escriba convertiría en inválidos documentos honestos, que es 
 El texto canónico vive sólo en `verify_certificate.py` y los tests lo derivan de ahí
 (`tests/test_c_certificate.py:134`), así que el paso 2 no arrastra ediciones dispersas. Los cuatro
 JSON de ejemplo sí llevan copia congelada y se regeneran con `make_example.py`.
+
+---
+
+## DEF-4 — Omitir una clave conocida puede apagar un chequeo, en silencio
+
+### El caso, sobre el ejemplo que el propio repo publica
+
+`certificate-truncated.json` es el ejemplo empaquetado de lo que el código llama *«the most
+dangerous lie the format allows»* (`:592`): un rango declarado corto para que la parte incómoda del
+día quede afuera. **No contiene ninguna afirmación falsa** — por eso es peligroso.
+
+| el MISMO certificado mentiroso | veredicto |
+|---|---|
+| tal como se publica | **`RANGE_TRUNCATED`, exit 1** |
+| con `session.dayKey` **omitido** | **exit 0** — baja a `POST_RANGE_MATERIAL_EVENTS`, que no falla |
+| con `session.dayKey = null` | **exit 0** |
+| con el bloque `session` entero omitido | **exit 0** |
+
+El mecanismo está a la vista: `_check_range_covers_its_day` abre con
+`day = (cert.get("session") or {}).get("dayKey")` y todo el chequeo vive dentro de
+`if day is not None:` (`:604`, `:620`). **Sin `dayKey` no hay contra qué anclar, así que no se
+chequea — y no se dice que no se chequeó.**
+
+### Por qué esto contesta la mitad sustractiva y no la aditiva
+
+Es la diferencia entera entre las dos preguntas, en un solo caso:
+
+> **Un campo que el verificador no conoce es INERTE: no puede apagar nada. Una clave conocida que
+> falta puede apagar un chequeo — y el documento que resulta es MÁS SILENCIOSO, no más ruidoso.**
+
+Por eso «ignorar lo desconocido» (§5.3) es seguro y «ignorar lo ausente» no lo es. Son reglas
+opuestas para casos que se parecen.
+
+### El agravante: la limpieza de los `?? ""` está por salir
+
+El emisor tiene seis lugares con `?? ""` y el arreglo correcto es omitir la clave. Medido, sobre
+`session.timezone`, que es uno de los seis:
+
+| | veredicto |
+|---|---|
+| `timezone = ""` (lo que hace hoy el `?? ""`) | **exit 1, `DECORATIVE_FIELD`** |
+| `timezone = null` | exit 0, limpio |
+| `timezone` **ausente** | exit 0, limpio |
+
+Así que el `?? ""` **ya está produciendo certificados que fallan** — la corrección no es cosmética.
+Pero `dayKey` vive en el mismo objeto `session`, y ahí omitir desarma una protección. **El mismo
+patrón de arreglo, aplicado a dos campos vecinos, da un resultado correcto y un desastre.**
+
+### La salida
+
+`session.dayKey` ausente tiene que pasar de **silencio** a **`cannot_verify`**: el chequeo de
+cobertura no corrió, y eso se dice. No a contradicción — un certificado sin `dayKey` no es falso,
+es menos verificable, y §5.3 ya fijó que acusar a un documento honesto es catastrófico.
+
+La regla general que lo cubre, y el resto de los casos, es §5.8.
+
+---
+
+## DEF-3 — La regla 5 lee claves de datos como si fueran nombres de campo
+
+### Qué preguntó Ventana A, y la respuesta
+
+`ACCOUNT_UNKNOWN` es un nombre de evento legítimo (`Ledger.cs:28`) y llega al certificado como
+valor de `triggerEvent` y como **clave** en `reasons`. La pregunta: ¿`DECORATIVE_FILLER` lo atrapa?
+
+**No. Riesgo cerrado, y no por argumento — ya está en la superficie de regresión del repo.** El
+certificado de ejemplo empaquetado lleva hoy mismo `"triggerEvent": "ACCOUNT_UNKNOWN"` y
+`"reasons": {"ACCOUNT_UNKNOWN": 3}`, y verifica **limpio, exit 0**.
+
+Las tres propiedades, medidas una por una:
+
+| propiedad | ¿se cumple? | medido |
+|---|---|---|
+| **comparación por valor completo, no subcadena** | **SÍ** | `ACCOUNT_UNKNOWN`, `UNKNOWN_STATE`, `unknown_account`, `the state is unknown` → todos limpios. Sólo `unknown` exacto dispara |
+| **sobre VALORES, no claves** | **SÍ** | las claves de `reasons` van al *path*, no al valor; los valores son enteros y el chequeo exige `isinstance(value, str)` |
+| **sensible a mayúsculas** | **NO** — normaliza con `.lower()` y `.strip()` | `UNKNOWN`, `Unknown`, `NONE`, `None`, `TBD`, `N/A`, `" unknown "` → todos disparan |
+
+### Sobre la tercera: hacerla sensible a mayúsculas la DEBILITARÍA
+
+Es la única de las tres que no se cumple, y creo que la regla propuesta es la equivocada, por un
+motivo que se ve al mirar la lista: **`TODO`, `TBD`, `XXX` y `N/A` son relleno que en la vida real
+se escribe en MAYÚSCULAS.** Una comparación sensible a mayúsculas los dejaría pasar a todos —
+perdería contra su blanco principal para protegerse de una colisión que hay que demostrar que
+existe.
+
+La propiedad que hace falta no es la sensibilidad a mayúsculas. Es **no colisionar con el
+vocabulario legítimo, probado.** Y eso se demuestra con un barrido, no con una regla de
+comparación. Lo hice (abajo): cero colisiones hoy.
+
+Queda un residuo honesto que **no puedo cerrar solo**: si el guardián tiene un literal de estado
+`"UNKNOWN"` o `"NONE"` —no un evento, un *estado*— dispararía. No puedo leer ese repositorio. Es
+el ítem 6 del aviso: que nos manden el conjunto enumerado de literales.
+
+### El defecto que sí encontré, que es la misma familia un piso más abajo
+
+El **otro** chequeo de la regla 5, `_promise_violations` (`:194-237`), no mira el valor: deriva un
+nombre de campo del **último segmento del path** (`:213-214`). Y las claves de `reasons` y de
+`clockAnomalies.byType` **son nombres de evento**. Es decir: la regla 5 lee un nombre de evento
+como si fuera un nombre de campo del esquema.
+
+Medido, con el valor siendo el contador entero:
+
+| clave de `reasons` | veredicto |
+|---|---|
+| `SEAL_HASH` | `FIELD_BELIES_ITS_NAME` — «named for a cryptographic hash but holds 1» |
+| `CONFIG_HASH` | `FIELD_BELIES_ITS_NAME` |
+| `DAILY_LOSS`, `LOSS_LIMIT`, `SOFT_LIMIT` | `FIELD_BELIES_ITS_NAME` — «named for money but holds 1» |
+| `EXPIRES_AT_UTC` | `FIELD_BELIES_ITS_NAME` — «the name promises a point in time» |
+
+**Hoy no muerde**, barrido completo: los 27 nombres de evento del guardián visibles desde este repo
+y los 19 `KINDS` del kit, por `reasons` y por `clockAnomalies.byType` — **cero colisiones**.
+
+Pero es por suerte. `SEAL_MISMATCH` se salva porque termina en `match` y no en `hash`;
+`LIMIT_BREACHED` porque termina en `breached` y no en `limit`. **Basta con que alguien nombre un
+evento `CONFIG_HASH` —y `CONFIG_LOADED` ya lleva un `configHash` en su payload— para que todo
+certificado que lo cuente entre sus razones falle acusando al trader de un campo decorativo que
+nunca escribió.**
+
+### La salida
+
+El chequeo de promesas debe aplicarse a **nombres de campo del esquema**, nunca a claves derivadas
+de datos. Dos formas, y la diferencia es chica:
+
+1. **No descender con nombre** en los contenedores de claves libres (`reasons`, `byType`): sus
+   claves son datos, no esquema.
+2. **Invertir**: aplicar las promesas sólo a un conjunto conocido de nombres de campo.
+
+Recomiendo (1): es más chica, y (2) convierte la regla 5 en una lista que hay que mantener al día,
+que es justo lo que se evitó cuando se escribió como pregunta genérica.
+
+**Y la prueba que la cierra de verdad**, que es la lección de §5.7 hecha mecánica: un test que
+barre **el vocabulario entero de eventos** a través de la regla 5 y exige cero hallazgos. Lo que
+hice a mano una vez, corriendo en CI para siempre. Necesita el vocabulario completo del guardián —
+ítem 6 del aviso.
 
 ---
 
@@ -451,6 +603,112 @@ El motivo es una lección que vino del otro lado y aplica a nuestro propio proce
 
 ---
 
+## 5.7 — RULING — Toda contención léxica se prueba contra lo que podría atrapar
+
+> **Una contención léxica tiene que coincidir EXACTAMENTE con lo que prohíbe, y se prueba contra
+> los valores legítimos que podría atrapar.**
+
+**Un filtro que prohíbe de más falla ruidosamente sobre contenido honesto, que es peor que no
+tenerlo: enseña a desactivarlo.** Ése es el costo real — no el falso positivo suelto, sino que la
+primera vez que un filtro acusa a un documento verdadero, alguien aprende que el filtro se puede
+apagar, y a partir de ahí no protege de nada.
+
+Nació de que **el mismo error apareció dos veces el mismo día, en los dos lados del sistema**:
+
+- **Lado del guardián:** la contención de los mensajes iba a prohibir la palabra `"cancelled"`, y
+  `"0 orders cancelled"` es el reporte cierto de un barrido que sí ocurrió. Se resolvió prohibiendo
+  **construcciones**, no palabras.
+- **Este lado:** prohibir `"unknown"` atraparía `ACCOUNT_UNKNOWN`. No lo atrapa —la comparación es
+  por valor completo (§DEF-3)— pero eso se supo **midiendo**, no diseñando.
+
+Dos sistemas distintos, la misma tentación: escribir la prohibición sobre el fragmento en vez de
+sobre la unidad que tiene significado.
+
+**Obligaciones que quedan, para cualquier filtro léxico presente o futuro:**
+
+1. **La unidad de comparación es la unidad de significado.** Valor completo, no subcadena. Campo,
+   no fragmento. Construcción, no palabra.
+2. **Se prueba contra el vocabulario legítimo**, enumerado, con un test que barre todo el conjunto
+   y exige cero hallazgos. No basta con revisar los casos que se le ocurrieron a alguien.
+3. **La normalización se justifica o no se hace.** `.lower()` en `DECORATIVE_FILLER` está bien
+   —`TODO`/`TBD`/`XXX` son relleno en mayúsculas— pero está bien *porque se puede argumentar*, y
+   el argumento va escrito al lado. Una normalización sin motivo escrito es superficie de colisión
+   gratis.
+4. **El filtro se aplica donde vive el esquema, no donde viven los datos.** DEF-3 es esta
+   obligación incumplida: la regla 5 lee claves de `reasons` —que son datos— como si fueran nombres
+   de campo.
+
+## 5.8 La mitad sustractiva: ¿admite el formato que una clave FALTE?
+
+**Sí, y ya lo hace con un gradiente de cuatro escalones que está casi bien.** No hace falta
+inventarlo: hace falta escribirlo y corregir los casos mal clasificados.
+
+Medido, quitando cada clave conocida del certificado de ejemplo:
+
+| ausencia | veredicto | escalón |
+|---|---|---|
+| `ledgerDialect`, `claims.ledgerRange` | **exit 2**, `DIALECT_MISSING` / `RANGE_MISSING` | *no puedo mirar* |
+| `limitations` | **exit 1**, `LIMITATIONS_MISSING` | *el documento pierde integridad* |
+| `trustLevel` | **exit 1**, `TRUST_LEVEL_INVALID` | *ídem* |
+| `certHash` | **exit 1**, `CERTHASH_MISMATCH` | *ídem* |
+| `claims.limitRespected`, `failClosedEpisodes`, `changeAttemptsWhileSealed` | **exit 0** + `CLAIM_ABSENT` | *no puedo juzgar esta afirmación* |
+| `session.dayKey`, `continuity`, `issuer`, `subject`, `previousCertHash` | **exit 0**, silencio | *no cambia nada* ← **y para `dayKey` es falso: DEF-4** |
+
+> *(Corrección: en una primera corrida anoté `certHash` ausente como exit 0. Estaba mal — mi
+> helper de re-sellado lo reponía después de borrarlo. Medido de nuevo sin re-sellar: exit 1,
+> `CERTHASH_MISMATCH`, que es lo correcto. Lo dejo escrito porque el instrumento tapó el resultado
+> y ésa es la falla que importa, no la fila.)*
+
+### — RULING PROPUESTO — cómo se clasifica una clave ausente
+
+*(Es el único de este documento que no viene ratificado; lo traigo con la clasificación hecha.)*
+
+> **Una clave conocida que falta se clasifica por lo que su ausencia APAGA, no por lo que deja de
+> decir.**
+>
+> 1. Sin ella el verificador **no puede mirar** ⇒ `cannot_evaluate`, exit 2.
+> 2. Sin ella el documento **pierde integridad** —no se puede saber qué documento es, ni qué
+>    promete— ⇒ contradicción, exit 1.
+> 3. Sin ella **una afirmación no se puede juzgar** ⇒ `cannot_verify`, exit 0, dicho.
+> 4. **Sin ella UN CHEQUEO NO CORRE** ⇒ `cannot_verify`, exit 0, **dicho — nunca silencio.**
+> 5. Silencio **sólo** si su ausencia no cambia nada de lo que el documento afirma ni de lo que el
+>    verificador comprobó.
+>
+> **El escalón 4 es el que hoy falta**, y es el que hace de la ausencia un arma. Un chequeo que no
+> corrió es información; callarlo convierte un documento menos verificado en uno indistinguible de
+> uno más verificado.
+
+**Nunca contradicción por ausencia sola.** Una clave ausente no es una afirmación falsa. Acusar a
+un documento honesto de incompleto es el error que §5.3 llama catastrófico, y aplica igual acá.
+
+### La frontera que esto le agrega al ruling de §5.6
+
+§5.6 dijo «desconocido se omite, nunca se defaultea». Sigue en pie y queda **acotado**:
+
+> **Se omite un campo que lleva un VALOR. Nunca uno que lleva un ALCANCE.**
+
+`session.timezone` lleva un valor: omitirlo pierde un dato. `session.dayKey` lleva el alcance
+contra el cual se juzga el rango: omitirlo apaga el juicio. Son vecinos en el mismo objeto y la
+misma receta de arreglo produce lo correcto en uno y un desastre en el otro.
+
+**Antes de omitir una clave hay que preguntar: ¿alguien la usa como puerta?** Si la respuesta es
+sí, se declara `null` explícito —que preserva «no lo sé» sin desarmar nada— o se deja de tratar
+como opcional.
+
+### La puerta sustractiva de §5.5
+
+La contención de §5.5 está escrita toda del lado aditivo: «ninguna entrada puede anular a otra».
+Tiene una gemela que hay que cerrar con ella:
+
+> **Tampoco se omite una clave para que un chequeo no corra.** Agregar un evento que dice «esto no
+> cuenta» y quitar una clave para que nadie cuente son el mismo daño por puertas opuestas — y la
+> segunda es más barata, no deja rastro, y hoy **funciona** (DEF-4).
+
+La prueba para el que aplique la regla, en su forma completa: *¿este cambio —agregar o quitar—
+hace que algo se verifique MENOS y el documento no lo diga? Entonces no va.*
+
+---
+
 # PARTE IV — LO QUE FALTA DEBAJO DE TODO
 
 ## 6. El verificador de la evidencia cita una especificación que nunca se versionó
@@ -471,7 +729,7 @@ Va como ítem propio, y hay que decidir dónde vive la regla de §5: en `docs/SP
 en el `CERT_SPEC` que hay que crear. Si es lo segundo, este repo tiene que apuntar a dónde vive,
 porque hoy cita cuatro secciones de un documento que no tiene.
 
-## 7. Estado de los tres pedidos
+## 7. Estado de los pedidos del emisor
 
 | pedido | ¿rompe algo? | estado |
 |---|---|---|
@@ -486,9 +744,14 @@ porque hoy cita cuatro secciones de un documento que no tiene.
 2. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
    inyección top-level como control.
 3. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
-4. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
-5. Escribir §5 donde se decida en §6.
-6. Recién entonces, el evento de acuse.
+4. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify` (§5.8 escalón 4), con
+   `certificate-truncated.json` sin `dayKey` como control. **Sube a este puesto por calendario**:
+   el emisor está por limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
+5. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
+6. **DEF-3** — que las promesas de la regla 5 no bajen a claves de datos, más el barrido del
+   vocabulario entero como test de regresión (§5.7 obligación 2). Necesita el ítem 6 del aviso.
+7. Escribir §5 donde se decida en §6.
+8. Recién entonces, el evento de acuse.
 
 **DEF-2 va primero porque NO NECESITA ADVERSARIO:** emite falsedades hoy, en operación normal, sin
 que nadie haga nada. DEF-1 es un agujero que alguien tendría que usar.

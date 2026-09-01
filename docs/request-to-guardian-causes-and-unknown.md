@@ -1,13 +1,17 @@
 # Request to the guardian side: one retraction, and three obligations that follow from it
 
 **From:** the `deadman` verifier session
-**Subject:** a correction to item 4b of `request-to-guardian-emitter.md`, and what the emitter must
-write instead — plus the emitter half of a defect we found in our own verifier
+**Subject:** a correction to item 4b of `request-to-guardian-emitter.md`, what the emitter must
+write instead, the one field the `?? ""` cleanup must not touch — plus the emitter half of two
+defects we found in our own verifier
 **Status:** request. Nothing here has been implemented on either side.
 
-**Item 1 is urgent and is a retraction of something we asked for.** If item 4b is already being
-built, stop and read that item first: implementing it as written produces certificates that our own
-verifier refuses, and the fault is ours, not yours.
+**Items 1 and 1b are urgent.** Item 1 is a retraction: if item 4b is already being built, stop and
+read it first — implementing it as written produces certificates that our own verifier refuses, and
+the fault is ours, not yours. **Item 1b is time-critical rather than wrong**: the `?? ""` cleanup is
+correct and already overdue, but one of the six fields must not be omitted, and if the cleanup
+ships uniformly before we land our fix, a protection disappears without anyone deciding to remove
+it.
 
 Every claim below was measured against the real verifier and the packaged example
 (`deadman/examples/certificate/`), each case with its control so that a passing result is known to
@@ -61,6 +65,68 @@ else that inherited the phrasing from that document.
 **And keep the distinction 4b was actually protecting**, because it is correct and it is the point:
 an absent `exhausted` is not `exhausted: false`, it is a different event. `null` and absent both
 preserve that; the string `"unknown"` would have destroyed it by looking like an answer.
+
+---
+
+## 1b. URGENT — the six `?? ""` sites: omit is right for five of them, and wrong for `dayKey`
+
+### The good news first, measured
+
+`?? ""` is not cosmetic. It is **already producing certificates that fail.** On `session.timezone`,
+which is one of the six:
+
+| what the emitter writes | verdict |
+|---|---|
+| `""` — today's `?? ""` | **exit 1, `DECORATIVE_FIELD`** |
+| `null` | exit 0, clean |
+| field **absent** | exit 0, clean |
+
+The empty string is in `DECORATIVE_FILLER` alongside `example` and `placeholder`, and the rule-5
+check treats it as exactly what it is: a field that looks like content and carries none. **Both of
+the fixes you were going to make — omit, or null — verify clean.** So item 1's instruction (absent
+or null, never a filler string) covers this too, and it is more urgent than we thought, because the
+current behaviour is not "slightly untidy", it is exit 1.
+
+Note also that `null` is not a loophole we are tolerating: `_promise_violations` exempts it
+explicitly (`verify_certificate.py:211`). A declared `null` is a first-class way to say "I do not
+know this", by design.
+
+### The trap, and it is in the same object
+
+**Do not apply the omit pattern to `session.dayKey`.**
+
+`certificate-truncated.json` is our shipped example of the most dangerous lie the format allows: a
+range declared short so the inconvenient part of the day falls outside it. Measured, on that exact
+file:
+
+| the same lying certificate | verdict |
+|---|---|
+| as shipped | **`RANGE_TRUNCATED`, exit 1** |
+| with `session.dayKey` omitted | **exit 0** |
+| with `session.dayKey` set to `null` | **exit 0** |
+| with the whole `session` block omitted | **exit 0** |
+
+The whole day-coverage check lives inside `if day is not None:`. **No `dayKey`, no check — and
+today we do not even say the check was skipped.** That is our defect and we are fixing it; the
+reason it is in your document is the timing: if the `?? ""` cleanup ships before our fix, and the
+pattern is applied uniformly across all six sites, a certificate can lose the protection without
+anybody choosing to remove it.
+
+### The ask
+
+1. **Tell us which six sites they are.** We can see one (`session.timezone`) and are guessing at
+   the rest. We want to check each against what the verifier does with it, before you change them.
+2. **For each: omit or `null`, never `""`.** Both are clean.
+3. **`session.dayKey` is not in that set.** If it is currently one of the six, it needs a real
+   value, not an omission and not a null — it is the anchor the range is judged against.
+
+The rule we are adopting on our side, which is what separates the two cases:
+
+> **Omit a field that carries a VALUE. Never one that carries a SCOPE.**
+
+`timezone` carries a value: omitting it loses a datum. `dayKey` carries the scope the document is
+judged against: omitting it switches the judgement off. They are neighbours in the same object and
+the same fix produces the right answer on one and a silent hole on the other.
 
 ---
 
@@ -188,6 +254,65 @@ things is true and both need an answer before that event is touched:
   harmless, but then whoever adds `buildHash` must be careful not to drop it; or
 - the emitter does **not** write `fresh`, in which case the example we publish misrepresents the
   format, and that is a problem of ours to fix regardless of this request.
+
+---
+
+## 6. Send us the enumerated vocabulary, so our filters can be tested against it
+
+### Why we are asking
+
+Your side raised a sharp question: `ACCOUNT_UNKNOWN` is a legitimate event name that reaches the
+certificate as a `triggerEvent` value and as a `reasons` key — does our `DECORATIVE_FILLER` list
+catch it and fail the first real disconnection episode?
+
+**It does not.** Measured: the comparison is on whole values, not substrings, so `ACCOUNT_UNKNOWN`,
+`UNKNOWN_STATE` and `unknown_account` all pass; only the bare word `unknown` matches. And the
+packaged example certificate already carries `"triggerEvent": "ACCOUNT_UNKNOWN"` and
+`"reasons": {"ACCOUNT_UNKNOWN": 3}` and verifies clean at exit 0 — the case is already in our
+regression surface.
+
+**But we found the same fault one level down, and it is real.** The other rule-5 check derives a
+field name from the last path segment, and the keys of `reasons` and `clockAnomalies.byType` are
+**event names**. So an event whose name ends in `hash`, `loss`, `limit` or `utc` produces a false
+`FIELD_BELIES_ITS_NAME` against its own integer count. Measured: `SEAL_HASH`, `CONFIG_HASH`,
+`DAILY_LOSS`, `SOFT_LIMIT` and `EXPIRES_AT_UTC` all fire.
+
+We swept the 27 event names we can see plus our own 19 kinds: **zero collisions today.** But
+`SEAL_MISMATCH` is safe only because it ends in `match` rather than `hash`. That is luck, and
+`CONFIG_HASH` is a name nobody would think twice about — `CONFIG_LOADED` already carries a
+`configHash` in its payload.
+
+We are fixing the check on our side. **We also want the test that keeps it fixed**, and that test
+needs your vocabulary.
+
+### The ask
+
+Two lists, as plain enumerations — no code, no schema, just the names:
+
+1. **Every event name the guardian can emit.** We assembled 27 from what is visible in this
+   repository and we have no way to know whether that is all of them.
+2. **Every state / reason / enum literal that can appear as a value in a certificate** — the
+   `state` in `GUARDIAN_STARTED`, lockout reasons, seal bases, anything of that shape.
+
+The second list matters for a residue we cannot close alone: our filler comparison is
+case-insensitive, so a **state literal** spelled `"UNKNOWN"` or `"NONE"` would be flagged, while an
+*event* named `ACCOUNT_UNKNOWN` is fine. We are keeping the case-insensitivity deliberately —
+`TODO`, `TBD` and `XXX` are filler that gets written in capitals, and a case-sensitive match would
+let all three through — so the protection has to come from proving non-collision instead. We cannot
+prove it against a vocabulary we cannot read.
+
+**If either list contains a bare `UNKNOWN` or `NONE` as a value, tell us and we will treat it as a
+live defect on our side, not on yours.**
+
+### The rule this comes from
+
+Written down because it has now bitten both sides of the system on the same day — your message
+containment was going to ban the word `"cancelled"`, and `"0 orders cancelled"` is the true report
+of a sweep that did happen; ours was going to ban `"unknown"`:
+
+> **A lexical containment must match exactly what it forbids, and is tested against the legitimate
+> values it could catch.** A filter that forbids too much fails loudly on honest content, which is
+> worse than not having it: it teaches people to switch it off.
 
 ---
 
