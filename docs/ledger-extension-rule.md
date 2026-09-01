@@ -1,4 +1,4 @@
-# Cómo se extiende el ledger — cinco defectos vivos, y la regla que va encima
+# Cómo se extiende el ledger — seis defectos vivos, y la regla que va encima
 
 > **POR QUÉ HAY QUE ESCRIBIR LA ESPECIFICACIÓN** (§6) — el argumento entero, en una frase:
 >
@@ -20,7 +20,7 @@
 > inerte y una clave ausente puede APAGAR UN CHEQUEO.**
 
 **De:** la sesión de `deadman` (la librería)
-**Asunto:** cinco defectos en la verificación de evidencia, y la regla de extensión del ledger
+**Asunto:** seis defectos en la verificación de evidencia, y la regla de extensión del ledger
 (mitad aditiva y mitad sustractiva)
 **Estado:** los defectos son hallazgos medidos, no propuestas. **Todo lo marcado RULING está
 DECIDIDO por el operador** — la salida de DEF-1, la de DEF-2, §5.3, §5.4, §5.6, §5.7 y el orden de
@@ -43,7 +43,7 @@ digo del emisor sale del ejemplo empaquetado en *este* repo y de
 
 ---
 
-# PARTE I — LOS CINCO DEFECTOS
+# PARTE I — LOS SEIS DEFECTOS
 
 Los cuatro van **antes** de la regla de extensión. Tienen prioridad por ejes distintos y conviene
 no fingir un único orden:
@@ -55,6 +55,7 @@ no fingir un único orden:
 | **DEF-4** omitir `session.dayKey` apaga el chequeo de truncamiento | **desactiva en silencio** la protección contra la mentira más peligrosa del formato | no — basta con **omitir** | no, pero decide §5.8 |
 | **DEF-3** la regla 5 lee claves de datos como nombres de campo | acusa en falso a contenido honesto | no — basta con **nombrar** un evento | no |
 | **DEF-5** la línea `VALID` nombra una clave que no verificó | publica como comprobado algo que nadie miró | no | no, pero **exige** §6 |
+| **DEF-6** un corte de luz vuelve acusatorio a un certificado honesto | afirma que el trader se pasó del límite | **no — lo hace la red eléctrica** | no |
 
 DEF-3 hoy **no muerde**: barrí el vocabulario entero y no hay colisiones. Pero no muerde por
 suerte, no por diseño, y la suerte no escala. Va con prioridad menor y con la prueba que la cierra.
@@ -314,6 +315,79 @@ que el emisor la escriba convertiría en inválidos documentos honestos, que es 
 El texto canónico vive sólo en `verify_certificate.py` y los tests lo derivan de ahí
 (`tests/test_c_certificate.py:134`), así que el paso 2 no arrastra ediciones dispersas. Los cuatro
 JSON de ejemplo sí llevan copia congelada y se regeneran con `make_example.py`.
+
+---
+
+## DEF-6 — Un corte de luz hace que un certificado honesto diga que el trader se pasó del límite
+
+**Segundo corte de energía en 48 horas.** Deja de ser accidente y pasa a ser **condición de
+operación de esta máquina** (operador, 1-sep). Así que la conducta ante un ledger **truncado** —no
+adulterado, cortado— deja de ser hipotética: es un caso que esta casa produce sola, dos veces por
+semana. Medido el día que volvió a pasar.
+
+### Lo medido
+
+| el ledger | veredicto |
+|---|---|
+| **CONTROL** entero | exit **0**, `VERIFIED at L1` |
+| truncado **a mitad de línea** | exit **2** — correcto, `_read_ledger_lines` levanta y el CLI lo trata como «no pude mirar» |
+| truncado **en un límite de línea**, falta 1 fila | exit **1**, `RANGE_INCOMPLETE` |
+| truncado en un límite, faltan 3 filas | exit **1**, `RANGE_INCOMPLETE` **+ `CLAIM_MISMATCH`: `limitRespected` certificado `True`, «los eventos dicen `False`» + el episodio pasa a `open`** |
+| **CONTROL** adulterado (JSON válido, hash mal) | exit **1**, `CHAIN_BROKEN` + `CLAIM_MISMATCH` |
+
+### Por qué el caso malo es el PROBABLE, no el raro
+
+El corte a mitad de línea da exit 2 y está bien. **Pero es el caso improbable**: el ledger hace
+`flush()` + `fsync()` después de **cada línea completa** (`deadman/ledger.py:267-268`), así que un
+corte deja casi siempre un archivo **cortado en un límite de línea** — el caso que da exit 1.
+
+**La protección funciona en el escenario que casi no ocurre y falla en el que ocurre.**
+
+### Y lo que publica no es sólo «incompleto»
+
+Con tres filas perdidas, el verificador afirma que **`limitRespected` es falso** y que un episodio
+de fail-closed **quedó abierto**. El mecanismo es directo: perder el `FAIL_CLOSED_CLEARED` deja el
+episodio abierto, y `limit_respected` exige que ninguno lo esté.
+
+> **Un corte de luz no vuelve al certificado inevaluable: lo vuelve ACUSATORIO.** Fabrica
+> exactamente la afirmación más dañina que el documento puede hacer sobre su portador — que se pasó
+> del límite — sin que nadie toque nada.
+
+Es la misma forma que §6bis (difamar con el archivo equivocado), con una diferencia que la empeora:
+allí hacía falta que alguien entregara el archivo equivocado; acá **lo produce la red eléctrica.**
+
+### El discriminador existe y el verificador ya tiene todo para usarlo
+
+**Un truncamiento no puede romper la cadena.** La cadena se construye hacia adelante, así que
+quitar un **sufijo** deja un **prefijo válido que verifica entero hasta génesis**. Confirmado en la
+medición: en el caso truncado **no aparece `CHAIN_BROKEN`** — sólo `RANGE_INCOMPLETE`. En el
+adulterado sí aparece, en la fila exacta.
+
+> **Un prefijo cuya cadena verifica entera, con el rango declarado excediéndolo por el FINAL, es la
+> firma de un TRUNCAMIENTO, no de una adulteración. La cadena no se puede truncar por adelante.**
+
+O sea: la información para distinguir «este archivo está corto» de «este certificado mintió» **ya
+está en la mesa**, y la severidad no la usa.
+
+### Lo que propongo, y por qué no lo aplico todavía
+
+1. **`RANGE_INCOMPLETE` con las entradas faltantes formando un SUFIJO y el prefijo encadenando
+   limpio ⇒ `cannot_evaluate`** (exit 2), no contradicción. Es el ruling de §6bis aplicado a la
+   misma forma: el verificador no puede distinguir un certificado que sobre-declaró de un archivo
+   que llegó corto, y una de las dos causas es la red eléctrica.
+2. **Y las afirmaciones NO se recomputan sobre un rango que no se tiene.** Hoy `recompute_claims`
+   corre igual sobre las filas presentes y publica el resultado como si fuera el del rango
+   declarado. Eso es computar sobre evidencia ausente, que es justo lo que §5.8 escalón 4 manda
+   declarar en vez de calcular. Sin esto, arreglar sólo el código de salida deja el `CLAIM_MISMATCH`
+   acusatorio en el cuerpo del informe.
+
+**No lo aplico en esta tanda** porque el punto 2 cambia cuándo se recomputan las afirmaciones, que
+es más que un código mal ruteado, y la cola tiene 6b adelante. Entra como **DEF-6**, y por el
+criterio de §8 —cuántos tienen que hacer algo mal— es **tier cero**: nadie se equivoca, se corta la
+luz.
+
+**Nota para §6**: la conducta ante un archivo truncado es un caso que la especificación tiene que
+cubrir explícitamente, y ahora tiene evidencia de frecuencia en vez de ser un supuesto.
 
 ---
 
