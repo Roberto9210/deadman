@@ -80,5 +80,31 @@ para que nadie la cobre como más.
 
 ---
 
+## ENMIENDA 1 — 2026-09-01, antes de escribir el contenido
+
+**El texto de §3 no se toca.** Esta enmienda se agrega debajo, fechada y en su propio commit, para
+que un tercero vea en el `git log` qué decía el sello original y qué se le añadió. Un sello que se
+edita en su lugar no es un sello.
+
+**La cláusula C queda ETIQUETADA** (operador, 1-sep):
+
+> El hallazgo adicional de C **se cuenta aparte y se marca AUTO-ATESTIGUADA, no medida.**
+
+**El motivo:** quien certifica que yo no sabía algo de antemano **soy yo**, y este ejercicio existe
+precisamente porque desconfiamos de eso. La cláusula sigue valiendo — es la única evidencia
+positiva que el ejercicio puede producir — pero **no es del mismo tipo que el negativo de A**, que
+sí es limpio: A no depende de mi palabra sobre mi propio estado mental, sólo de si la adyacencia
+aparece o no en un texto que ya está escrito.
+
+**Cómo se reporta**, para que nadie las cobre como lo mismo:
+
+| resultado | tipo | qué lo sostiene |
+|---|---|---|
+| **A** (negativo: no aparece la adyacencia) | **medido** | el texto escrito, verificable por cualquiera |
+| **B** (aparece) | **medido, pero no concluyente** | el texto, y la limitación declarada del autor |
+| **C** (hallazgo adicional) | **AUTO-ATESTIGUADA** | mi palabra de que no lo sabía — nada más |
+
+---
+
 *Relacionado: `docs/ledger-extension-rule.md` §5.11 (dos implementaciones que adivinaron igual no
 se corroboran), §6.2 (la pregunta generadora), §6.2b (este ejercicio como control del método).*

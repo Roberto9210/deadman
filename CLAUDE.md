@@ -80,6 +80,27 @@ documento derivó cada uno?* Si es «de ninguno», el acuerdo es un hecho sobre 
 no sobre el mundo. Mientras no exista la especificación compartida, todo acuerdo entre este repo y
 `deadman-guardian` se reporta como **consistente**, nunca como **corroborado**.
 
+## La forma que tiene que tener todo pre-registro
+
+No es de un caso: es la forma, de acá en más.
+
+1. **El compromiso va en su PROPIO commit, antes del contenido.** No se sella sólo qué se espera:
+   se sella **qué va a significar cada resultado**, para que un nulo no se pueda explicar después
+   ni un positivo celebrar. Sin eso, es como no medir.
+2. **El orden de los commits ES la garantía**, y es lo que la vuelve mejor que una promesa: un
+   tercero la lee en el `git log` sin confiar en nadie. Es la primera forma de pre-registro de esta
+   casa con **verificación externa en vez de palabra**.
+3. **Se declara explícitamente lo que NO se puede prometer.** Un autor que ya conoce la respuesta
+   no puede producir un positivo válido, pero **sí puede producir un negativo válido**; eso se
+   escribe antes, no después. Decir el límite es lo que vuelve creíble el resto.
+4. **Cada resultado se etiqueta por lo que lo sostiene**: *medido* (verificable por un tercero) o
+   *auto-atestiguado* (mi palabra sobre mi propio estado). Los dos pueden servir; **no se cobran
+   como lo mismo.**
+5. **Las enmiendas se agregan debajo, fechadas y en su propio commit.** El texto sellado no se
+   edita en su lugar — un sello que se reescribe no es un sello.
+
+Ejemplo vivo: `docs/prereg-episode-20260901.md`.
+
 ## Método, en corto
 
 - **Verificar contra el código real antes de afirmar.** Un hallazgo no verificado no es un hecho, y

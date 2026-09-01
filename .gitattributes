@@ -1,3 +1,16 @@
-# Every blob in this repo is CRLF; `* -text` stops git converting endings, so an edit that keeps them
-# no longer rewrites the file and moves its blame. Not normalising is deliberate: that commit would.
+# Line endings here are MIXED, and that is the measured state, not the goal. At 2026-09-01:
+# 23 of 72 blobs are LF-only (deadman/verify_certificate.py among them, entirely) and 4 test
+# files are mixed inside themselves. It was already so when this file was added: 21 of 46 then.
+# The sentence that used to sit here - "every blob in this repo is CRLF" - was false on the day
+# it was written, and it was the premise the freeze was argued from.
+#
+# What `* -text` does, and it still holds: it stops GIT converting in either direction, so an
+# edit that KEEPS a file's own endings does not rewrite it or move its blame. It promises
+# nothing more - in particular it does NOT stop an EDITOR from writing a file back with other
+# endings, which still lands as a whole-file diff (measured again 2026-09-01: 3,075 lines for a
+# one-line change). Keep a file's own endings; check the diff size before committing.
+#
+# Whether to normalise is OPEN, not decided: cc776d1 rejected it because the conversion commit
+# would itself be a whole-repo rewrite, and that cost is real. What has changed is that it is
+# no longer a uniform state being protected.
 * -text
