@@ -160,6 +160,32 @@ aparece en dominios que no se hablan, lo cual vale. Lo que no queda probado: que
 distinto lo hubiera visto. Un tercer camino independiente **de observador** — alguien que no sea
 esta casa encontrando la misma forma — es lo que cerraría eso, y no lo tenemos.
 
+## La cadena no se puede truncar por adelante
+
+**Un prefijo que encadena entero es una historia real que termina antes de tiempo. Un eslabón roto
+en el medio es otra cosa.**
+
+Es una propiedad estructural de cualquier log append-only encadenado, y **separa PÉRDIDA de
+MANIPULACIÓN sin costar nada**: no hace falta un campo nuevo, no toca ningún contrato, ya está en
+los datos. Es el único discriminador gratis que tenemos.
+
+**Cómo se usa:** si faltan entradas y las que faltan forman un **sufijo**, y lo presente verifica
+hasta génesis, el archivo se cortó — no lo falsificaron. Eso es *no pude mirar* (exit 2), no *te
+agarré mintiendo* (exit 1). Un hueco en el **medio**, o un eslabón que no recomputa, es la otra
+historia y se sigue leyendo como tal.
+
+**Caso que la originó (2026-09-01):** dos cortes de luz en 48 horas. El ledger hace `fsync` por
+línea, así que un corte deja el archivo cortado en un límite de línea — filas enteras, JSON válido,
+sólo que menos. El verificador lo llamaba `CONTRADICTED` y, con tres filas perdidas, publicaba que
+el trader **se pasó de su límite**. Todos los demás defectos de esta casa eran la herramienta
+**afirmando de más**; ése era la herramienta **acusando a un inocente**, y el certificado existe
+para mostrárselo a un tercero que va a actuar sobre él.
+
+**Y el control que va con ella, porque es el que importa:** al enseñarle a un verificador a
+reconocer la pérdida, **la detección de manipulación tiene que seguir intacta**. Si el arreglo del
+caso benigno también apaga el caso malicioso, se cambió un daño por otro peor. Se prueba con el
+archivo adulterado, y con uno que esté cortado **y** adulterado a la vez.
+
 ## Método, en corto
 
 - **Verificar contra el código real antes de afirmar.** Un hallazgo no verificado no es un hecho, y

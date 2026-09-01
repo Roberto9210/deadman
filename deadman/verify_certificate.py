@@ -1236,11 +1236,6 @@ def verify_certificate(cert: Mapping[str, Any],
 
     present = {e.get(dialect.f_seq) for e in ledger_entries}
     absent = [s for s in range(from_seq, to_seq + 1) if s not in present]
-    if absent:
-        rep.contradict("RANGE_INCOMPLETE",
-                       f"the declared range covers seq {from_seq}..{to_seq} but "
-                       f"{len(absent)} entr{'y is' if len(absent) == 1 else 'ies are'} "
-                       f"missing from the ledger (first: {absent[0]})")
 
     _check_range_covers_its_day(cert, ledger_entries, dialect, from_seq, to_seq, rep)
 
@@ -1249,6 +1244,35 @@ def verify_certificate(cert: Mapping[str, Any],
     if not rep.chain_ok:
         rep.contradict("CHAIN_BROKEN",
                        f"the hash chain does not recompute; first break at seq {rep.broken_seq}")
+
+    # ---- short file, or a lying range? THE CHAIN CANNOT BE TRUNCATED FROM THE FRONT.
+    #
+    # A hash chain is built forward, so removing a SUFFIX leaves a prefix that still verifies all
+    # the way to genesis. A prefix that chains whole, with the declared range running past the end
+    # of the file, is the signature of a TRUNCATION - a real history that stops early - not of a
+    # forgery. A broken link in the MIDDLE is the other story, and it still reads as one.
+    #
+    # Why the severity had to move: a power cut leaves the file cut at a LINE BOUNDARY, because
+    # the writer fsyncs after each complete line. Before this, that produced CONTRADICTED, and
+    # with a few rows lost it also published `limitRespected: false` and an episode left open -
+    # the most damaging thing this document can say about the person holding it, manufactured by
+    # the electricity supply. Every other defect in this verifier was the tool claiming too much;
+    # this one was the tool accusing someone who did nothing.
+    truncated = bool(absent) and rep.chain_ok and absent == list(range(absent[0], to_seq + 1))
+    if truncated:
+        rep.cannot_evaluate(
+            "LEDGER_TRUNCATED",
+            f"the ledger stops at seq {absent[0] - 1} but the certificate declares "
+            f"{from_seq}..{to_seq}: {len(absent)} entr"
+            f"{'y is' if len(absent) == 1 else 'ies are'} missing from the END, and everything "
+            f"present chains cleanly. That is a file that was cut short - a power cut, a partial "
+            f"copy, a truncated attachment - not a certificate that lies. Nothing here is proved "
+            f"or disproved; ask for a complete copy of the ledger")
+    elif absent:
+        rep.contradict("RANGE_INCOMPLETE",
+                       f"the declared range covers seq {from_seq}..{to_seq} but "
+                       f"{len(absent)} entr{'y is' if len(absent) == 1 else 'ies are'} "
+                       f"missing from the ledger (first: {absent[0]})")
 
     # ---- certHash
     declared_hash = cert.get("certHash")
@@ -1266,13 +1290,27 @@ def verify_certificate(cert: Mapping[str, Any],
     claimed = cert.get("claims") or {}
     commitment = cert.get("commitment") or {}
 
+    def disagree(code: str, detail: str) -> None:
+        """On a truncated ledger a disagreement is not a finding against the certificate.
+
+        The claims are still recomputed - WHEN they are recomputed does not change here - but they
+        were recomputed over rows that are missing their tail, so a difference says the file is
+        short, not that the holder lied. Losing a FAIL_CLOSED_CLEARED is enough to turn
+        `limitRespected` false. Reported, never charged."""
+        if truncated:
+            rep.cannot_verify(code + "_OVER_TRUNCATED_RANGE",
+                              detail + " - recomputed over an incomplete ledger, so this is a "
+                                       "consequence of the missing entries, not a finding")
+        else:
+            rep.contradict(code, detail)
+
     def compare(key: str, mine: Any, theirs: Any) -> None:
         if theirs is None:
             rep.cannot_verify("CLAIM_ABSENT",
                               f"the certificate does not state `{key}`; recomputed value is {mine!r}")
         elif theirs != mine:
-            rep.contradict("CLAIM_MISMATCH",
-                           f"`{key}`: certificate says {theirs!r}, the events say {mine!r}")
+            disagree("CLAIM_MISMATCH",
+                     f"`{key}`: certificate says {theirs!r}, the events say {mine!r}")
 
     compare("limitRespected", rep.recomputed["limitRespected"], claimed.get("limitRespected"))
     compare("lockoutsTriggered", rep.recomputed["lockoutsTriggered"], claimed.get("lockoutsTriggered"))
@@ -1289,18 +1327,18 @@ def verify_certificate(cert: Mapping[str, Any],
                           f"the certificate does not state `failClosedEpisodes`; recomputed "
                           f"{len(mine_eps)}")
     elif len(theirs_eps) != len(mine_eps):
-        rep.contradict("CLAIM_MISMATCH",
-                       f"`failClosedEpisodes`: certificate lists {len(theirs_eps)}, the events "
+        disagree("CLAIM_MISMATCH",
+                   f"`failClosedEpisodes`: certificate lists {len(theirs_eps)}, the events "
                        f"give {len(mine_eps)}")
     else:
         for i, (m, t) in enumerate(zip(mine_eps, theirs_eps)):
             if t.get("reasons") is not None and t["reasons"] != m["reasons"]:
-                rep.contradict("CLAIM_MISMATCH",
-                               f"`failClosedEpisodes[{i}].reasons`: certificate says "
+                disagree("CLAIM_MISMATCH",
+                           f"`failClosedEpisodes[{i}].reasons`: certificate says "
                                f"{t['reasons']!r}, the events say {m['reasons']!r}")
             if bool(t.get("open")) != bool(m["open"]):
-                rep.contradict("CLAIM_MISMATCH",
-                               f"`failClosedEpisodes[{i}].open`: certificate says "
+                disagree("CLAIM_MISMATCH",
+                           f"`failClosedEpisodes[{i}].open`: certificate says "
                                f"{t.get('open')!r}, the events say {m['open']!r}")
             # The field that assigns blame was the ONE field in this block nobody checked:
             # measured, replacing it with a fabrication verified clean at exit 0 while a
@@ -1319,13 +1357,13 @@ def verify_certificate(cert: Mapping[str, Any],
                                   f"`failClosedEpisodes[{i}]` names no preceding event; "
                                   f"recomputed {m['precedingEvent']!r}")
             elif theirs_prev != m["precedingEvent"]:
-                rep.contradict("CLAIM_MISMATCH",
-                               f"`failClosedEpisodes[{i}].precedingEvent`: certificate says "
+                disagree("CLAIM_MISMATCH",
+                           f"`failClosedEpisodes[{i}].precedingEvent`: certificate says "
                                f"{theirs_prev!r}, the events say {m['precedingEvent']!r}")
             theirs_seq = t.get("precedingSeq", t.get("triggerSeq", _MISSING))
             if theirs_seq is not _MISSING and theirs_seq != m["precedingSeq"]:
-                rep.contradict("CLAIM_MISMATCH",
-                               f"`failClosedEpisodes[{i}].precedingSeq`: certificate says "
+                disagree("CLAIM_MISMATCH",
+                           f"`failClosedEpisodes[{i}].precedingSeq`: certificate says "
                                f"{theirs_seq!r}, the events say {m['precedingSeq']!r}")
 
     # ---- rule 5: fields that promise more than they carry

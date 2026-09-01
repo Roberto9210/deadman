@@ -369,13 +369,40 @@ adulterado sí aparece, en la fila exacta.
 O sea: la información para distinguir «este archivo está corto» de «este certificado mintió» **ya
 está en la mesa**, y la severidad no la usa.
 
-### Lo que propongo, y por qué no lo aplico todavía
+### PRIMERA MITAD APLICADA (2026-09-01) — y por qué se adelantó
 
-1. **`RANGE_INCOMPLETE` con las entradas faltantes formando un SUFIJO y el prefijo encadenando
-   limpio ⇒ `cannot_evaluate`** (exit 2), no contradicción. Es el ruling de §6bis aplicado a la
-   misma forma: el verificador no puede distinguir un certificado que sobre-declaró de un archivo
-   que llegó corto, y una de las dos causas es la red eléctrica.
-2. **Y las afirmaciones NO se recomputan sobre un rango que no se tiene.** Hoy `recompute_claims`
+**Se adelantó a 6b, y no por el criterio de §8.** Todos los demás defectos de este verificador
+son la herramienta **afirmando de más**; éste es la herramienta **acusando a un inocente**
+(operador, 1-sep). Una herramienta que promete de más decepciona; una que fabrica una acusación
+contra su portador lo **daña** — y el certificado existe justamente para mostrárselo a un
+tercero que va a actuar sobre él. Hay 12 certificados emitidos y una página pública que invita
+a verificar con esta herramienta.
+
+**Partido en dos, porque el daño no está en el cómputo sino en lo que se publica como
+veredicto.** Aplicada la primera mitad: cuando la firma del truncamiento está presente
+—cadena verifica hasta génesis **y** las faltantes forman un sufijo— el veredicto pasa a
+**exit 2 `LEDGER_TRUNCATED`**, y cualquier desacuerdo de claims sale como
+`CLAIM_MISMATCH_OVER_TRUNCATED_RANGE` en el bloque de *no verificado*, nunca como cargo.
+**No cambia cuándo se recomputa nada**: cambia cómo se presenta y con qué código sale.
+
+Medido, con el control que tenía que sobrevivir:
+
+| caso | antes | después |
+|---|---|---|
+| entero | exit 0 | exit 0 |
+| cortado limpio, 1 fila | **exit 1** `RANGE_INCOMPLETE` | **exit 2** `LEDGER_TRUNCATED` |
+| cortado limpio, 3 filas | **exit 1** + «`limitRespected` los eventos dicen False» | **exit 2**, sin cargo |
+| **CONTROL adulterado** | exit 1 `CHAIN_BROKEN` | **exit 1 `CHAIN_BROKEN`** — intacto |
+| **CONTROL cortado Y adulterado** | — | **exit 1 `CHAIN_BROKEN`** — la manipulación gana |
+| **CONTROL hueco en el MEDIO** | — | **exit 1 `CHAIN_BROKEN`** — no es truncamiento |
+
+Cinco tests nuevos. Contra el código viejo fallan **exactamente los dos que afirman el
+arreglo**, y los **tres controles de conducta preservada pasan en las dos versiones** — que es
+la forma que prueba que el cambio tocó lo que quería y nada más.
+
+### Segunda mitad, pendiente, y puede ir detrás de 6b
+
+**No recomputar afirmaciones sobre un rango que no se tiene.** Hoy `recompute_claims`
    corre igual sobre las filas presentes y publica el resultado como si fuera el del rango
    declarado. Eso es computar sobre evidencia ausente, que es justo lo que §5.8 escalón 4 manda
    declarar en vez de calcular. Sin esto, arreglar sólo el código de salida deja el `CLAIM_MISMATCH`

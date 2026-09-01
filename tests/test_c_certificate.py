@@ -837,6 +837,79 @@ def test_def2_a_certificate_that_names_no_preceding_event_is_not_accused():
     assert "CLAIM_ABSENT" in {f.code for f in rep.unverified}
 
 
+# ================================================================== DEF-6
+
+def test_def6_a_ledger_cut_short_is_not_a_certificate_that_lied():
+    """A power cut is a condition this machine produces, not a hypothetical: twice in 48 hours.
+
+    The writer fsyncs after every complete line, so the file comes back cut at a LINE BOUNDARY -
+    valid JSON, whole rows, just fewer of them. Before this, that verdict was CONTRADICTED, which
+    is the tool saying *I caught you lying* about a document that says nothing false."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    assert verify_certificate(cert, entries).exit_code == EXIT_OK      # control: it can pass
+
+    rep = verify_certificate(cert, entries[:-1])
+    assert rep.exit_code == EXIT_UNEVALUABLE
+    assert not rep.contradictions, "a short file must never be charged as a lie"
+    assert "LEDGER_TRUNCATED" in {f.code for f in rep.unevaluable}
+
+
+def test_def6_tampering_is_still_caught_after_the_truncation_fix():
+    """THE CONTROL THAT MUST SURVIVE. If teaching the verifier about truncation also blunted its
+    detection of forgery, we would have traded one harm for a worse one."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+
+    tampered = [dict(e) for e in entries]
+    tampered[3] = dict(tampered[3])
+    tampered[3]["payload"] = {**tampered[3].get("payload", {}), "planted": True}
+
+    rep = verify_certificate(cert, tampered)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CHAIN_BROKEN" in codes(rep)
+
+
+def test_def6_tampering_wins_when_a_file_is_both_cut_and_forged():
+    """Truncation is only an excuse when nothing else is wrong. A broken link is a broken link."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    both = [dict(e) for e in entries[:-1]]
+    both[3] = dict(both[3])
+    both[3]["payload"] = {**both[3].get("payload", {}), "planted": True}
+
+    rep = verify_certificate(cert, both)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CHAIN_BROKEN" in codes(rep)
+
+
+def test_def6_a_hole_in_the_middle_is_not_a_truncation():
+    """THE CHAIN CANNOT BE TRUNCATED FROM THE FRONT: that is what makes this discriminator free.
+    Rows missing from the MIDDLE break the link and are not excused."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    holed = entries[:4] + entries[5:]
+
+    rep = verify_certificate(cert, holed)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CHAIN_BROKEN" in codes(rep)
+
+
+def test_def6_a_truncated_ledger_never_says_the_trader_breached_the_limit():
+    """The actual damage, as its own case. Losing a FAIL_CLOSED_CLEARED leaves the episode open,
+    and `limitRespected` requires that none are - so a power cut used to publish, as a finding,
+    that the holder went past their limit. The claims are still recomputed; what changed is that
+    a disagreement over a file with its tail missing is reported, not charged."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+
+    for cut in range(1, 4):
+        rep = verify_certificate(cert, entries[:-cut])
+        assert rep.exit_code != EXIT_CONTRADICTED, f"cut={cut}"
+        charged = " ".join(f"{f.code}: {f.detail}" for f in rep.contradictions)
+        assert "limitRespected" not in charged, f"cut={cut}: {charged}"
+
+
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
     Every attack here must be REFUSED - never exit 0 - and must name what it found.
