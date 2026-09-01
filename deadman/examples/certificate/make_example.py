@@ -101,7 +101,15 @@ def build_certificate(entries: list[dict], salt: str, *, issuer_known: bool = Tr
             "limitRespected": c["limitRespected"],
             "lockoutsTriggered": c["lockoutsTriggered"],
             "ordersRejectedWhileLocked": c["ordersRejectedWhileLocked"],
-            "failClosedEpisodes": c["failClosedEpisodes"],
+            # The verifier recomputes these as `precedingEvent`/`precedingSeq` - the name no
+            # longer claims a cause it never derived. The EMITTER still writes
+            # `triggerEvent`/`triggerSeq`, and renaming a field of the certificate is its
+            # side of the contract, so the examples keep the emitter's spelling until it
+            # migrates. The verifier accepts either.
+            "failClosedEpisodes": [
+                {("triggerEvent" if k == "precedingEvent" else
+                  "triggerSeq" if k == "precedingSeq" else k): v for k, v in ep.items()}
+                for ep in c["failClosedEpisodes"]],
             "clockAnomalies": c["clockAnomalies"],
             "ledgerRange": {"fromSeq": lo, "toSeq": hi},
             "ledgerVerified": True,

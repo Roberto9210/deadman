@@ -629,7 +629,26 @@ def _verify_chain(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
 # Claim recomputation (SPEC §A.2) - the heart of the thing
 # --------------------------------------------------------------------------------------
 
+_MISSING = object()
+
 _BOUNDARY = ("FAIL_CLOSED_ENTERED", "FAIL_CLOSED_CLEARED")
+
+#: Events that are TESTIMONY ABOUT A PERSON, not evidence about the account. Reserved prefix.
+#:
+#: An acknowledgement says "somebody saw this". It never says "therefore this does not count", and
+#: no event may ever mean that. What it must also never do is become part of the machine's story:
+#: measured, an acknowledgement landing inside a fail-closed episode was counted among that
+#: episode's `reasons`, and one landing immediately before it was published as its cause. A human
+#: reading a certificate would have found "the guardian went blind. Cause: a person looked at the
+#: warning."
+#:
+#: So the exclusion is STRUCTURAL rather than careful: no HUMAN_* event is an input to any
+#: recomputed claim. It changes no number.
+HUMAN_EVENT_PREFIX = "HUMAN_"
+
+
+def _is_human(name: Any) -> bool:
+    return isinstance(name, str) and name.startswith(HUMAN_EVENT_PREFIX)
 
 #: Events whose absence from a certificate changes what it says about the trader. Used only to
 #: describe what a declared range leaves out - never to recompute a claim.
@@ -1033,13 +1052,22 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
         name = r.get(ev)
         if name == "FAIL_CLOSED_ENTERED":
             if current is None:
-                trigger = rows[idx - 1] if idx > 0 else None
+                # PRECEDING, not TRIGGER. The old name promised a cause and delivered adjacency:
+                # measured, inserting PNL_CHECKPOINT, CONFIG_LOADED, DAY_OPENED or SEAL_CREATED
+                # before a fail-closed made each of them the published "cause". The rule is
+                # positional and always was; only the name claimed otherwise. Deriving the real
+                # cause would need FAIL_CLOSED_ENTERED to carry its own reason, which the emitter
+                # has already reported as unreachable without new broker I/O on that path.
+                j = idx - 1
+                while j >= 0 and _is_human(rows[j].get(ev)):
+                    j -= 1                      # testimony about a person is not part of the story
+                trigger = rows[j] if j >= 0 else None
                 if trigger is not None and trigger.get(ev) in _BOUNDARY:
                     trigger = None
                 current = {"fromSeq": r[dialect.f_seq], "fromUtc": r.get(dialect.f_ts),
                            "open": True, "reasons": {},
-                           "triggerSeq": trigger[dialect.f_seq] if trigger else None,
-                           "triggerEvent": trigger.get(ev) if trigger else None}
+                           "precedingSeq": trigger[dialect.f_seq] if trigger else None,
+                           "precedingEvent": trigger.get(ev) if trigger else None}
                 if trigger is not None:
                     current["reasons"][trigger[ev]] = 1
         elif name == "FAIL_CLOSED_CLEARED" and current is not None:
@@ -1048,7 +1076,7 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
             current["open"] = False
             episodes.append(current)
             current = None
-        elif current is not None and name not in _BOUNDARY:
+        elif current is not None and name not in _BOUNDARY and not _is_human(name):
             current["reasons"][name] = current["reasons"].get(name, 0) + 1
     if current is not None:
         current["toSeq"] = to_seq
@@ -1274,6 +1302,31 @@ def verify_certificate(cert: Mapping[str, Any],
                 rep.contradict("CLAIM_MISMATCH",
                                f"`failClosedEpisodes[{i}].open`: certificate says "
                                f"{t.get('open')!r}, the events say {m['open']!r}")
+            # The field that assigns blame was the ONE field in this block nobody checked:
+            # measured, replacing it with a fabrication verified clean at exit 0 while a
+            # falsified `reasons` was caught. Indefensible in an evidence artefact, so it is
+            # compared now. Either name is accepted: the emitter still writes `triggerEvent`
+            # and renaming a field of the CERTIFICATE is its side of the contract, not ours.
+            #
+            # And what this comparison is worth, said plainly rather than oversold: the emitter
+            # derives this field by adjacency too, so it will agree with us on every honest
+            # certificate. That closes "anybody can write anything" and closes nothing else.
+            # What makes the document true is the NAME no longer claiming a cause, plus the
+            # limitation the emitter has yet to ship.
+            theirs_prev = t.get("precedingEvent", t.get("triggerEvent", _MISSING))
+            if theirs_prev is _MISSING:
+                rep.cannot_verify("CLAIM_ABSENT",
+                                  f"`failClosedEpisodes[{i}]` names no preceding event; "
+                                  f"recomputed {m['precedingEvent']!r}")
+            elif theirs_prev != m["precedingEvent"]:
+                rep.contradict("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].precedingEvent`: certificate says "
+                               f"{theirs_prev!r}, the events say {m['precedingEvent']!r}")
+            theirs_seq = t.get("precedingSeq", t.get("triggerSeq", _MISSING))
+            if theirs_seq is not _MISSING and theirs_seq != m["precedingSeq"]:
+                rep.contradict("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].precedingSeq`: certificate says "
+                               f"{theirs_seq!r}, the events say {m['precedingSeq']!r}")
 
     # ---- rule 5: fields that promise more than they carry
     for code, detail in check_rule_five(cert):

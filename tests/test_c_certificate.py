@@ -382,7 +382,7 @@ def test_c6_fail_closed_episodes_are_episodes_not_causes():
     eps = rep.recomputed["failClosedEpisodes"]
     assert len(eps) == 1, eps
     assert eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 3}
-    assert eps[0]["triggerSeq"] == 6 and eps[0]["triggerEvent"] == "ACCOUNT_UNKNOWN"
+    assert eps[0]["precedingSeq"] == 6 and eps[0]["precedingEvent"] == "ACCOUNT_UNKNOWN"
     assert eps[0]["fromSeq"] == 7, "the block began at ENTERED; counting the trigger must not lengthen it"
     assert eps[0]["open"] is False
     assert rep.ok
@@ -394,7 +394,7 @@ def test_c6_an_episode_with_nothing_before_it_has_no_trigger():
                        ("FAIL_CLOSED_CLEARED", {"previousReason": "PnlUncomputable"})])
     rep = verify_certificate(make_cert(entries), entries)
     ep = rep.recomputed["failClosedEpisodes"][0]
-    assert ep["triggerSeq"] is None and ep["triggerEvent"] is None
+    assert ep["precedingSeq"] is None and ep["precedingEvent"] is None
     assert ep["reasons"] == {}
 
 
@@ -411,8 +411,8 @@ def test_c6_a_boundary_marker_is_never_counted_as_a_trigger():
     rep = verify_certificate(make_cert(entries), entries)
     eps = rep.recomputed["failClosedEpisodes"]
     assert len(eps) == 2
-    assert eps[0]["triggerEvent"] == "ACCOUNT_UNKNOWN" and eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 1}
-    assert eps[1]["triggerEvent"] is None and eps[1]["reasons"] == {}
+    assert eps[0]["precedingEvent"] == "ACCOUNT_UNKNOWN" and eps[0]["reasons"] == {"ACCOUNT_UNKNOWN": 1}
+    assert eps[1]["precedingEvent"] is None and eps[1]["reasons"] == {}
 
 
 def test_c6_hiding_an_episode_is_a_contradiction():
@@ -716,6 +716,126 @@ def test_c18_the_cli_output_is_ascii_safe():
 
 
 # ================================================================== the judge itself
+
+# ================================================================== DEF-2
+
+def _episode_ledger(extra=None, where="before"):
+    """A fail-closed episode, optionally with one extra event beside its entry."""
+    rows = gledger(DISCONNECT_DAY)
+    i = next(n for n, r in enumerate(rows) if r.get("event") == "FAIL_CLOSED_ENTERED")
+    if extra is not None:
+        rows.insert(i if where == "before" else i + 1, dict(extra))
+    for n, r in enumerate(rows, start=1):
+        r["seq"] = n
+    prev = "genesis"
+    for r in rows:
+        r["prev"] = prev
+        r.pop("hash", None)
+        r["hash"] = GUARDIAN_CORE_V1.hash_of(r)
+        prev = r["hash"]
+    return rows
+
+
+def _reseal(cert):
+    """Mutating a cert breaks its own certHash; these tests are about the CLAIM check."""
+    from deadman.verify_certificate import _cert_preimage, _sha256_hex
+    cert.pop("certHash", None)
+    cert["certHash"] = _sha256_hex(_cert_preimage(cert))
+    return cert
+
+
+def _ev(name):
+    return {"event": name, "payload": {}, "schemaVersion": 1, "seq": 0,
+            "tsUtc": "2026-02-18T15:59:00.000Z"}
+
+
+def test_def2_the_field_no_longer_claims_a_cause_it_never_derived():
+    """`triggerEvent` promised the thing that caused the episode and delivered whatever happened
+    to be adjacent. Renamed to what it measures. The rule was always positional; only the name
+    said otherwise."""
+    rows = _episode_ledger()
+    ep = recompute_claims(rows, GUARDIAN_CORE_V1, 1, len(rows), True)["failClosedEpisodes"][0]
+    assert "precedingEvent" in ep and "precedingSeq" in ep
+    assert "triggerEvent" not in ep and "triggerSeq" not in ep
+
+
+def test_def2_an_ordinary_event_before_the_entry_is_still_reported():
+    """CONTROL for the two HUMAN_ tests below: the position is still read, and reported."""
+    rows = _episode_ledger(_ev("PNL_CHECKPOINT"))
+    ep = recompute_claims(rows, GUARDIAN_CORE_V1, 1, len(rows), True)["failClosedEpisodes"][0]
+    assert ep["precedingEvent"] == "PNL_CHECKPOINT"
+    assert ep["reasons"].get("PNL_CHECKPOINT") == 1
+
+
+def test_def2_a_human_event_never_becomes_the_preceding_event():
+    """An acknowledgement is testimony about a PERSON. Published as the thing before a
+    fail-closed entry, a reader gets 'the guardian went blind, and here is what came first' with
+    a human act in the slot. It is excluded by construction, not by care."""
+    rows = _episode_ledger(_ev("HUMAN_ACK"))
+    ep = recompute_claims(rows, GUARDIAN_CORE_V1, 1, len(rows), True)["failClosedEpisodes"][0]
+    assert ep["precedingEvent"] != "HUMAN_ACK"
+    assert "HUMAN_ACK" not in ep["reasons"]
+
+
+def test_def2_a_human_event_inside_an_episode_is_not_one_of_its_reasons():
+    """The position an acknowledgement will ACTUALLY occupy: inside the blind stretch, because
+    that is the state a human is being asked to acknowledge. Measured before the fix, it was
+    counted among the episode's `reasons` - a human fact inside the machine's causal account."""
+    rows = _episode_ledger(_ev("HUMAN_ACK"), where="inside")
+    ep = recompute_claims(rows, GUARDIAN_CORE_V1, 1, len(rows), True)["failClosedEpisodes"][0]
+    assert "HUMAN_ACK" not in ep["reasons"], ep["reasons"]
+
+
+def test_def2_a_human_event_changes_not_one_number():
+    """§5.4 in one assertion: an acknowledgement is testimony, never evidence about the account."""
+    plain = recompute_claims(_episode_ledger(), GUARDIAN_CORE_V1, 1, 99, True)
+    acked = recompute_claims(_episode_ledger(_ev("HUMAN_ACK"), where="inside"),
+                             GUARDIAN_CORE_V1, 1, 99, True)
+    for k in ("lockoutsTriggered", "changeAttemptsWhileSealed", "ordersRejectedWhileLocked",
+              "clockAnomalies", "limitRespected"):
+        assert plain[k] == acked[k], k
+    assert plain["failClosedEpisodes"][0]["reasons"] == acked["failClosedEpisodes"][0]["reasons"]
+
+
+def test_def2_the_preceding_event_is_now_compared():
+    """It was the one field in the episode block nobody checked, and it is the one that assigns
+    blame: a fabrication used to verify clean at exit 0."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    assert verify_certificate(cert, entries).exit_code == EXIT_OK      # control: it can pass
+
+    cert["claims"]["failClosedEpisodes"][0]["precedingEvent"] = "SOMETHING_THAT_NEVER_HAPPENED"
+    rep = verify_certificate(_reseal(cert), entries)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CLAIM_MISMATCH" in codes(rep)
+    assert "CERTHASH_MISMATCH" not in codes(rep), "must fail on the CLAIM, not on the hash"
+
+
+def test_def2_either_spelling_is_accepted_while_the_emitter_migrates():
+    """Renaming a field of the CERTIFICATE is the emitter's side of the contract, so the verifier
+    reads both. The shipped examples still carry `triggerEvent` and must keep verifying."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    ep = cert["claims"]["failClosedEpisodes"][0]
+    ep["triggerEvent"] = ep.pop("precedingEvent")      # the emitter's current spelling
+    ep["triggerSeq"] = ep.pop("precedingSeq")
+    assert verify_certificate(_reseal(cert), entries).exit_code == EXIT_OK
+
+
+def test_def2_a_certificate_that_names_no_preceding_event_is_not_accused():
+    """Absence is not a lie (§5.8): an older emitter that never wrote the field must not be
+    called a liar for it."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    ep = cert["claims"]["failClosedEpisodes"][0]
+    ep.pop("precedingEvent", None)
+    ep.pop("precedingSeq", None)
+    ep.pop("triggerEvent", None)
+    ep.pop("triggerSeq", None)
+    rep = verify_certificate(_reseal(cert), entries)
+    assert rep.exit_code == EXIT_OK
+    assert "CLAIM_ABSENT" in {f.code for f in rep.unverified}
+
 
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
