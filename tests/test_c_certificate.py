@@ -910,6 +910,85 @@ def test_def6_a_truncated_ledger_never_says_the_trader_breached_the_limit():
         assert "limitRespected" not in charged, f"cut={cut}: {charged}"
 
 
+# ================================================================== DEF-5 / 6b
+
+def _sign(cert, key, tmp_path, serialization):
+    """Sign a certificate over its own certHash and return the public key on disk."""
+    cert["signature"] = {"alg": "Ed25519", "keyId": "whatever-the-emitter-wrote",
+                         "value": key.sign(cert["certHash"].encode()).hex()}
+    pem = tmp_path / "pub.pem"
+    pem.write_bytes(key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo))
+    return pem
+
+
+def test_def5_the_verdict_line_names_no_key_it_did_not_check(tmp_path):
+    """A FIELD PRINTED INSIDE A VERDICT INHERITS THE AUTHORITY OF THE VERDICT.
+
+    `issuer.keyId` was interpolated into the VALID line and was never checked against anything -
+    measured, a certificate signed by one key while naming another reported
+    `VALID (keyId=<the key that signed nothing>)`. The key that actually verifies is the one the
+    RECIPIENT supplied, and no PEM carries an identifier of its own, so there was nothing to check
+    it against. The fix is removal, not a caveat: a caveat beside an authorised claim loses."""
+    ed = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519",
+                             reason="signature checking needs deadman-kit[verify-sig]")
+    serialization = pytest.importorskip("cryptography.hazmat.primitives.serialization")
+
+    entries = gledger(QUIET_DAY)
+    key, other = ed.Ed25519PrivateKey.generate(), ed.Ed25519PrivateKey.generate()
+
+    cert = make_cert(entries)
+    cert["issuer"]["keyId"] = "key-ALPHA-which-signed-nothing"
+    _reseal(cert)
+    pem = _sign(cert, other, tmp_path, serialization)          # signed by OTHER, not by ALPHA
+
+    rep = verify_certificate(cert, entries, pubkey_path=pem)
+    assert rep.signature_status == "VALID"
+    assert "key-ALPHA" not in rep.signature_status
+    assert "keyId" not in rep.signature_status
+    assert "key-ALPHA" not in rep.render()
+    assert key is not other                                    # both keys were really distinct
+
+
+def test_def5_a_good_signature_still_reads_as_valid(tmp_path):
+    """CONTROL. Removing the field must not weaken what VALID means, and `VALID` on its own is
+    exactly what the verifier knows: the key you supplied signed this."""
+    ed = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519",
+                             reason="signature checking needs deadman-kit[verify-sig]")
+    serialization = pytest.importorskip("cryptography.hazmat.primitives.serialization")
+
+    entries = gledger(QUIET_DAY)
+    key = ed.Ed25519PrivateKey.generate()
+    cert = make_cert(entries)
+    pem = _sign(cert, key, tmp_path, serialization)
+
+    rep = verify_certificate(cert, entries, pubkey_path=pem)
+    assert rep.signature_status == "VALID"
+    assert rep.exit_code == EXIT_OK
+
+
+def test_def5_a_bad_signature_is_still_caught(tmp_path):
+    """CONTROL that must survive: teaching it to say less must not make it accept more."""
+    ed = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519",
+                             reason="signature checking needs deadman-kit[verify-sig]")
+    serialization = pytest.importorskip("cryptography.hazmat.primitives.serialization")
+
+    entries = gledger(QUIET_DAY)
+    key, other = ed.Ed25519PrivateKey.generate(), ed.Ed25519PrivateKey.generate()
+    cert = make_cert(entries)
+    _sign(cert, key, tmp_path, serialization)
+    wrong = tmp_path / "wrong.pem"
+    wrong.write_bytes(other.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo))
+
+    rep = verify_certificate(cert, entries, pubkey_path=wrong)
+    assert rep.signature_status == "INVALID"
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "SIGNATURE_INVALID" in codes(rep)
+
+
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
     Every attack here must be REFUSED - never exit 0 - and must name what it found.

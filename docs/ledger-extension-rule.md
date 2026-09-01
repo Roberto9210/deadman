@@ -1826,15 +1826,18 @@ corregir los blobs, o corregir la frase.
    **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros tres defectos
    dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el verificador.
    *(El paso 0 que había acá —`session.timezone`— se retiró: ver la retractación en §DEF-4.)*
-2. **DEF-5, arreglo mínimo (6b)** — sacar `keyId` de la línea `VALID`, en el render y en `--json`,
+2. ~~**DEF-5, arreglo mínimo (6b)**~~ — **HECHO (2026-09-01)**: `keyId` fuera de la línea `VALID`,
    sin reemplazo. **Sube del sexto puesto al segundo** (1-sep): el emisor imprime el puntero a
    nuestra herramienta **dentro del certificado** (`Certificate.cs:543-545`), así que hay un
    tercero mandando lectores a esa línea exacta. Por el criterio de §8 es tier **cero** — nadie
    tiene que equivocarse. Es un cambio de una línea y no necesita la especificación.
-3. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
+3. ~~**DEF-2**~~ — **HECHO (2026-09-01, `d51395c`)**: renombrado a `precedingEvent`/`precedingSeq`,
+   comparado, y con la exclusión `HUMAN_*` que resultó ser la mitad que de verdad bloqueaba el
+   acuse. Falta sólo la limitación de causas, que espera al emisor. Era: y la
    limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
    comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
-4. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
+4. **DEF-6 primera mitad** — **HECHO (2026-09-01, `514205c`)**: el truncamiento deja de acusar.
+5. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
    `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
    limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
 5. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de

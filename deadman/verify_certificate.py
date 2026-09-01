@@ -1178,7 +1178,23 @@ def _check_signature(cert: Mapping[str, Any], pubkey_path: Optional[Path],
         rep.contradict("SIGNATURE_INVALID",
                        f"the signature does not verify with the supplied key ({type(e).__name__})")
         return False
-    rep.signature_status = f"VALID (keyId={ (cert.get('issuer') or {}).get('keyId') })"
+    # `issuer.keyId` USED TO BE INTERPOLATED HERE, and this was the only place the verifier
+    # ever read it. Measured: signed by one key, with `issuer.keyId` naming another, verified
+    # against the first - the report said `VALID (keyId=<the key that signed nothing>)`. The
+    # field is never checked against anything; the key that actually verified is the one the
+    # RECIPIENT supplied with --pubkey, and no PEM carries an identifier of its own.
+    #
+    # A FIELD PRINTED INSIDE A VERDICT INHERITS THE AUTHORITY OF THE VERDICT. It does not matter
+    # that it was unverified: on the same line as VALID, a reasonable reader takes it as part of
+    # what was verified. So the fix is not a caveat beside it - a caveat competes with an
+    # authorised claim and loses - it is removing it from that line. It travelled into --json as
+    # the same string, where a consumer parses it as data.
+    #
+    # Not replaced by a fingerprint of the supplied key, deliberately: printing one where the
+    # keyId used to be invites the comparison the specification has not authorised yet, and would
+    # pick one of at least four derivations of key identity without saying so. What `VALID` means
+    # on its own is exactly what the verifier knows - the key you supplied signed this.
+    rep.signature_status = "VALID"
     return True
 
 
