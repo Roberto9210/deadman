@@ -403,6 +403,16 @@ mantener»—: sí es una lista, pero es **nuestra y cerrada** (los nombres del 
 certificado), no la del guardián (abierta, creciente y ajena), y **omitir de ella produce silencio,
 no una acusación.**
 
+La regla general que sale de haber elegido así, y que vale más que este arreglo:
+
+> **ENTRE DOS ARREGLOS CORRECTOS, GANA AQUEL CUYO MODO DE FALLA COINCIDE CON LA CALIBRACIÓN QUE EL
+> MÓDULO YA DECLARÓ.**
+
+No se eligió por elegante ni por más chica. Se eligió porque declarar contenedores **falla
+acusando** y la inversión **falla callando**, y el archivo dice por escrito que una acusación falsa
+cuesta un certificado injustamente rechazado. La calibración ya estaba tomada; el arreglo sólo
+tenía que no contradecirla.
+
 **Prototipada y corrida contra la suite real** (parche en el scratchpad, nada aplicado al repo):
 
 | | resultado |
@@ -756,6 +766,27 @@ sin que nada material esté escondido — el error que §5.3 llama catastrófico
 salida ve «bien». **La severidad atada al daño da las dos cosas bien**, y no inventa un criterio
 nuevo: es el que ya está escrito ocho líneas más arriba en el mismo archivo.
 
+### Por qué el downgrade es PEOR que el silencio, y por qué esto es una superficie de ataque
+
+La corrección empeora el defecto en vez de suavizarlo, y conviene decirlo entero:
+
+> **Un silencio no afirma nada. Un downgrade produce un documento que dice «no pude verificar»
+> donde la verdad era «verifiqué y está mal».** Un lector archiva un `cannot_verify` como
+> inconcluso — y era concluyente y feo.
+
+Y de ahí sale la forma general, que convierte un olor de diseño en algo con nombre:
+
+> **UNA SEVERIDAD QUE DEPENDE DE LA PRESENCIA DE UN CAMPO, EN VEZ DE DEPENDER DEL DAÑO, SE PUEDE
+> COMPRAR OMITIENDO DATOS.**
+
+Sacás `dayKey` y tu contradicción se convierte en un inconcluso. **Nadie tiene que falsificar
+nada: alcanza con no escribir una clave.** Es más barato que cualquier ataque del modelo de
+amenaza del §2b de la SPEC, no deja rastro en la cadena, y hoy funciona sobre el ejemplo que el
+propio repositorio publica como «la mentira más peligrosa que el formato permite».
+
+Por eso el arreglo no es cosmético ni de mensajería: **mientras la severidad dependa de qué campos
+están presentes, omitir es una palanca.**
+
 ### La frontera que esto le agrega al ruling de §5.6
 
 §5.6 dijo «desconocido se omite, nunca se defaultea». Sigue en pie y queda **acotado**:
@@ -844,6 +875,22 @@ Los ejemplos (`certificate.json`, `ledger.jsonl`) se **copiaron** al scratchpad 
 trabajaron ahí; no se escribió nada dentro de `deadman/` salvo este documento. Cada caso se
 construyó mutando el ejemplo, re-encadenando honestamente con las reglas reales de hash, y
 corriendo `verify_certificate` / `Ledger.verify` sobre el resultado. Todos los pares tienen control.
+
+### La práctica que lo atrapa, adoptada para toda sonda futura
+
+> **Toda medición incluye un caso que DEBE dar distinto. Si el control y el caso dan lo mismo, el
+> instrumento está contestando.**
+
+No es una nota de esta tanda: es la defensa que funcionó las **tres** veces que mi aparato tapó el
+resultado, no es sofisticada, y se aplica a cualquier sonda en cualquiera de los tres
+repositorios. Cada tabla de este documento la cumple — por eso están todas escritas en pares.
+
+**El aparato no es sólo el código de la sonda: es también la capa de presentación.** La tercera vez
+fue la consola de Git Bash renderizando `—` (U+2014) como `?` en cp1252. Lo leí como archivo
+corrupto, dije que un heredoc lo había roto, y era falso: el archivo estaba perfecto. Se descubrió
+porque «arreglé» el archivo y la pantalla **siguió** mostrando lo mismo. Si el arreglo hubiera
+cambiado el render por casualidad, la conclusión falsa habría quedado escrita. **Cuando lo que está
+en duda es cómo se VE algo, se verifica por valor — ordinal, bytes, aserción — nunca por pantalla.**
 
 ### La clase que apareció dos veces: mi herramienta contestó por el sujeto
 
