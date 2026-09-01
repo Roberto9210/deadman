@@ -1,4 +1,4 @@
-# Cómo se extiende el ledger — cuatro defectos vivos, y la regla que va encima
+# Cómo se extiende el ledger — cinco defectos vivos, y la regla que va encima
 
 > **La pregunta tiene dos mitades y este documento contesta las dos.** La aditiva —¿admite el
 > formato un campo o un evento que no conoce?— es §5.1-§5.6. La **sustractiva** —¿admite que una
@@ -6,7 +6,7 @@
 > inerte y una clave ausente puede APAGAR UN CHEQUEO.**
 
 **De:** la sesión de `deadman` (la librería)
-**Asunto:** cuatro defectos en la verificación de evidencia, y la regla de extensión del ledger
+**Asunto:** cinco defectos en la verificación de evidencia, y la regla de extensión del ledger
 (mitad aditiva y mitad sustractiva)
 **Estado:** los defectos son hallazgos medidos, no propuestas. **Todo lo marcado RULING está
 DECIDIDO por el operador** — la salida de DEF-1, la de DEF-2, §5.3, §5.4, §5.6, §5.7 y el orden de
@@ -16,7 +16,7 @@ está implementado, en ningún lado.
 Sale de cuatro pedidos del lado del guardián. Tres son ADITIVOS — un evento nuevo (acuse de
 recibo), el `buildHash` en `GUARDIAN_STARTED`, el `dayKey` en `CONFIG_LOADED` — y el cuarto va en
 dirección contraria: **seis sitios con `?? ""` cuyo arreglo correcto es OMITIR la clave.**
-Buscando si el formato los admitía aparecieron cuatro defectos que no dependen de esos pedidos y
+Buscando si el formato los admitía aparecieron cinco defectos que no dependen de esos pedidos y
 que hay que arreglar antes.
 
 Todo se midió contra el código real y el ejemplo empaquetado (`deadman/examples/certificate/`),
@@ -29,7 +29,7 @@ digo del emisor sale del ejemplo empaquetado en *este* repo y de
 
 ---
 
-# PARTE I — LOS CUATRO DEFECTOS
+# PARTE I — LOS CINCO DEFECTOS
 
 Los cuatro van **antes** de la regla de extensión. Tienen prioridad por ejes distintos y conviene
 no fingir un único orden:
@@ -40,6 +40,7 @@ no fingir un único orden:
 | **DEF-1** el campo top-level que nadie firma | rompe la propiedad que da valor al producto entero | sí (acceso a disco) | **sí** |
 | **DEF-4** omitir `session.dayKey` apaga el chequeo de truncamiento | **desactiva en silencio** la protección contra la mentira más peligrosa del formato | no — basta con **omitir** | no, pero decide §5.8 |
 | **DEF-3** la regla 5 lee claves de datos como nombres de campo | acusa en falso a contenido honesto | no — basta con **nombrar** un evento | no |
+| **DEF-5** la línea `VALID` nombra una clave que no verificó | publica como comprobado algo que nadie miró | no | no, pero **exige** §6 |
 
 DEF-3 hoy **no muerde**: barrí el vocabulario entero y no hay colisiones. Pero no muerde por
 suerte, no por diseño, y la suerte no escala. Va con prioridad menor y con la prueba que la cierra.
@@ -253,6 +254,81 @@ que el emisor la escriba convertiría en inválidos documentos honestos, que es 
 El texto canónico vive sólo en `verify_certificate.py` y los tests lo derivan de ahí
 (`tests/test_c_certificate.py:134`), así que el paso 2 no arrastra ediciones dispersas. Los cuatro
 JSON de ejemplo sí llevan copia congelada y se regeneran con `make_example.py`.
+
+---
+
+## DEF-5 — La línea VALID nombra una clave que no verificó
+
+### La pregunta que llegó, y la respuesta es medible
+
+Del lado del guardián, `CertificateRequest.KeyId` tiene **una fuente y dos consumidores tratados al
+revés, a 17 líneas**: `issuer.keyId` se omite si viene vacío, `signature.keyId` lo vacía. Ventana A
+fue a buscar el papel de cada uno y **ningún documento de ese repo los define**; los comentarios
+citan un `CERT_SPEC` que vive de este lado — y que acá tampoco existe (§6).
+
+*(Procedencia, §5.9: lo del lado del guardián es **reportado por Ventana A, no medido por
+nosotros**. Todo lo que sigue sobre el verificador **sí** es medición propia, con controles.)*
+
+La pregunta *«¿el verificador lo consume?»* se contesta sin que nadie decida nada:
+
+| medición | resultado |
+|---|---|
+| `signature.keyId` **borrado entero** | exit 0, `VALID (keyId=key-ALPHA)` — **sin cambio** |
+| `signature.keyId` reemplazado por una fabricación | exit 0, **sin cambio** |
+| **CONTROL** ambos presentes, clave correcta | exit 0, `VALID (keyId=key-ALPHA)` |
+
+**`signature.keyId` no se lee nunca.** Aparece 0 veces en el código del verificador.
+
+`issuer.keyId` **sí** se lee — en un solo lugar, `:1091`, y **sólo para interpolarlo en la cadena
+de estado**, únicamente en la rama VALID. No selecciona clave, no la busca, no la comprueba: la
+clave la aporta el receptor con `--pubkey`.
+
+### El defecto
+
+| medición | resultado |
+|---|---|
+| firmado por la clave **OTHER**, `issuer.keyId` dice `'key-ALPHA'`, verificado contra la pública de OTHER | exit 0, **`VALID (keyId=key-ALPHA)`** |
+| `issuer.keyId` = `null` o ausente | `VALID (keyId=None)` |
+
+> **El informe imprime VALID y nombra una clave que no firmó nada.**
+
+Es la familia de DEF-2 otra vez, y en el peor lugar posible: **un campo que nadie verificó,
+impreso adentro de un veredicto, heredando la autoridad del veredicto.** Un lector razonable lee
+`VALID (keyId=key-ALPHA)` como «esto lo firmó key-ALPHA y lo comprobé». Lo comprobado es sólo que
+*la clave que me diste* firmó esto. Quién es esa clave, el verificador no lo sabe ni lo mira.
+
+Detalle menor de la misma línea: ausente o `null` imprimen literalmente `keyId=None` — un `repr`
+de Python filtrándose a un informe que lee una persona.
+
+### Por qué no lo arreglo acá y qué hay que decidir
+
+La respuesta del operador era condicional: *si el verificador lo consume, es alcance y
+`signature.keyId` debe rehusar cuando falta; si lo ignora, hoy es decorativo y la pregunta cambia.*
+**Medido: no lo consume.** Así que la pregunta cambia — pero no a «es decorativo y da igual», sino
+a algo peor: **es decorativo Y se publica en el veredicto.**
+
+Los dos papeles coherentes, para la especificación de §6:
+
+1. **`keyId` es ALCANCE.** Nombra qué clave debe verificar; el verificador compara la clave
+   suministrada contra él y **rehúsa si falta** — una firma que no nombra su clave es media firma.
+   **Costo medido:** un PEM **no lleva identificador propio** (comprobado: no hay tal campo; lo
+   único derivable es un fingerprint, p. ej. SHA-256 del SPKI DER). Así que esta opción **no es
+   implementable hasta que la especificación DEFINA qué denota un `keyId`**. Hoy no lo define nadie,
+   que es exactamente cómo llegamos acá.
+2. **`keyId` es una PISTA para encontrar la clave, no una afirmación.** Entonces **no puede
+   aparecer en la línea del veredicto**, porque aparecer ahí lo convierte en afirmación.
+
+**Lo que no es defendible es el estado de hoy**, que toma prestado de las dos: se comporta como
+pista y se publica como afirmación.
+
+**Arreglo mínimo mientras la especificación no exista** — y es de los que no requieren decidir nada,
+porque no elige papel: **sacar `keyId` de la cadena `VALID`**, o reemplazarlo por lo que el
+verificador sí comprobó (la ruta o el fingerprint de la clave **suministrada**). Eso no define el
+papel del campo; sólo deja de afirmar lo que no se midió.
+
+**Y los dos papeles van a la especificación, no a un comentario de código.** Definirlos en un
+comentario es exactamente cómo se llegó a que un mismo campo tenga dos tratamientos opuestos a 17
+líneas sin que nadie esté equivocado.
 
 ---
 
@@ -1000,6 +1076,33 @@ Va como ítem propio, y hay que decidir dónde vive la regla de §5: en `docs/SP
 en el `CERT_SPEC` que hay que crear. Si es lo segundo, este repo tiene que apuntar a dónde vive,
 porque hoy cita cuatro secciones de un documento que no tiene.
 
+### El segundo caso, que lo convierte de anécdota en requisito (2026-09-01)
+
+El hallazgo llegó por otra puerta y con otro campo, y **el segundo caso es lo que lo asciende**:
+
+*(Procedencia, §5.9: la mitad del guardián es **reportada por Ventana A, no medida por nosotros**.)*
+
+- `CertificateRequest.KeyId` tiene una fuente y **dos consumidores tratados al revés, a 17 líneas**:
+  `issuer.keyId` se omite si viene vacío, `signature.keyId` lo vacía.
+- Ventana A buscó el papel de cada uno: **ni `SPEC.md`, ni `CERT_CONFORMANCE.md`, ni
+  `AMENDMENTS.md`** de ese repo los definen. Los comentarios citan un `CERT_SPEC` que vive de este
+  lado.
+- Y de este lado, medido: `CERT_SPEC` **tampoco existe**.
+
+> **La especificación que definiría esos papeles no existe en NINGÚN lado. Los dos repositorios
+> citan un documento que nunca se versionó, y por eso el mismo campo tiene dos tratamientos
+> opuestos SIN QUE NADIE ESTÉ EQUIVOCADO.**
+
+Esa última parte es la que hay que retener. No es un bug de nadie: es la consecuencia exacta de una
+referencia compartida a un documento ausente. Cada lado eligió un tratamiento razonable para un
+campo cuyo papel nadie escribió, y los dos tenían igual derecho.
+
+**Un documento faltante no produce un hueco visible. Produce dos decisiones locales coherentes,
+incompatibles entre sí, y ninguna reconocible como el error.**
+
+Por eso §6 deja de ser una observación y pasa a ser un requisito con dos casos que lo esperan: la
+regla de extensión (§5) y los papeles de `keyId` (DEF-5).
+
 ## 7. Estado de los pedidos del emisor
 
 | pedido | ¿rompe algo? | estado |
@@ -1025,6 +1128,9 @@ porque hoy cita cuatro secciones de un documento que no tiene.
    inyección top-level como control.
 5. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
 6. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
+6b. **DEF-5, arreglo mínimo** — sacar `keyId` de la línea `VALID`, o cambiarlo por lo que sí se
+   comprobó. No define el papel del campo, sólo deja de afirmar lo no medido; por eso puede ir
+   antes que la especificación. El papel en sí espera a §6.
 7. Escribir §5 donde se decida en §6.
 8. Recién entonces, el evento de acuse.
 
