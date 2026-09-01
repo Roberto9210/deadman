@@ -177,8 +177,66 @@ REQUIRED_LIMITATIONS: tuple[str, ...] = (
 # distinguishes nothing; and nothing in the shipped verifier would have told a recipient so.
 # --------------------------------------------------------------------------------------
 
+#: WHERE RULE 5 APPLIES, and it is decided by PROVENANCE rather than by the field's name.
+#:
+#: A producer writing "unknown" is papering over a hole. A person writing "unknown" is telling you
+#: their name. It is the same string and they are different things, and what separates them is
+#: where it came from. There is a third provenance, and it is the one that caused the trouble:
+#: a value COPIED VERBATIM out of the ledger. Judging the shape of a copied event name is judging
+#: somebody else's vocabulary, which changes without telling us.
+#:
+#: The general rule, because it will apply again:
+#:
+#:      COMPARISON AND SHAPE ARE ALTERNATIVE VERIFICATIONS, NOT COMPLEMENTARY.
+#:
+#: If a field can be compared against its source, compare it - and then shape-checking it can only
+#: produce false positives, because its shape is decided by someone else. If it cannot be compared,
+#: shape is all that is left.
+#:
+#: Measured over 144 adversarially generated event names (every suffix these checks react to, x
+#: every filler word, x the prefixes a real vocabulary produces): before this, 31 failed as a
+#: `reasons` key and 44 as a `triggerEvent` value. None of those names exists today; all of them
+#: are names somebody could choose tomorrow.
+
+#: Filled by a PERSON. Their word is their word - rule 5 does not apply. The risk of exempting
+#: them is nil: this check only ever refuses, so it cannot be tricked into approving anything.
+PERSON_SUPPLIED = frozenset({"alias"})
+
+#: COPIED VERBATIM from the ledger. Verified by COMPARISON against the evidence, which is strictly
+#: stronger than judging its shape - and that comparison is what DEF-2 asks for.
+COPIED_FROM_EVIDENCE = frozenset({"triggerEvent", "triggerSeq", "precedingEvent", "precedingSeq"})
+
+#: Names the CERTIFICATE SCHEMA owns, and the only ones whose shape is ours to judge.
+#:
+#: Inverted on purpose. Before, the promise checks descended into everything and needed the whole
+#: event vocabulary to stay clear of four suffixes to be safe; the keys of `reasons` and of
+#: `clockAnomalies.byType` ARE event names, so `CONFIG_HASH` or `DAILY_LOSS` would have accused a
+#: certificate over its own integer counter. That failure mode is backwards from the one this file
+#: declares 60 lines below ("the cost of a false accusation here is a certificate wrongly refused,
+#: so the checks err toward silence"): forgetting to declare a data-keyed container ACCUSED, while
+#: forgetting to add a schema name merely stays SILENT. Between two correct fixes, the one whose
+#: failure mode matches the calibration the module already declared wins.
+PROMISE_BEARING = frozenset({
+    "certHash", "previousCertHash", "buildHash", "sealHash", "ledgerHeadHash",
+    "armedAtUtc", "sealExpiryUtc", "openedUtc", "expiresAtUtc", "issuedAtUtc", "tsUtc",
+    "fromUtc", "toUtc",
+    "version",
+    "firmDailyLossLimit", "personalDailyLossLimit", "dayLoss",
+})
+
+
+def _leaf_name(path: str) -> str:
+    return path.split(".")[-1].split("[")[0]
+
+
 #: Values that look like content and carry none. Matched as whole values, case-insensitively, so
 #: a self-describing alias like "example-trader" passes while a bare "example" does not.
+#:
+#: Case-insensitive ON PURPOSE, and the alternative was considered and dropped: `TODO`, `TBD` and
+#: `XXX` are filler that gets written in capitals, so a case-sensitive match would let all three
+#: through. The protection against catching a legitimate value does not come from the comparison
+#: rule - it comes from PROVING NON-COLLISION against the real vocabulary, which is what
+#: tests/test_c_rule_five.py sweeps.
 DECORATIVE_FILLER = frozenset({
     "example", "test", "sample", "sample-value", "todo", "tbd", "changeme", "placeholder",
     "dummy", "foo", "bar", "baz", "xxx", "n/a", "none", "null", "unknown", "unset",
@@ -210,7 +268,9 @@ def _promise_violations(node: Any, path: str = "") -> list:
 
     if node is None or path == "":
         return out
-    key = path.split(".")[-1].split("[")[0]
+    key = _leaf_name(path)
+    if key not in PROMISE_BEARING:
+        return out          # not a name this schema owns: its shape is not ours to judge
     low = key.lower()
 
     def fail(promise: str, why: str):
@@ -247,6 +307,8 @@ def check_rule_five(cert: Mapping[str, Any]) -> list:
     findings = []
 
     for path, value in _walk_leaves(cert):
+        if _leaf_name(path) in PERSON_SUPPLIED or _leaf_name(path) in COPIED_FROM_EVIDENCE:
+            continue        # provenance: not the producer's word, so not the producer's filler
         if isinstance(value, str) and value.strip().lower() in DECORATIVE_FILLER:
             findings.append((
                 "DECORATIVE_FIELD",

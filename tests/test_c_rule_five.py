@@ -94,6 +94,86 @@ def test_free_text_fields_promise_nothing_and_are_left_alone():
     assert not find(cert)
 
 
+# ---------------------------------------------------------------- provenance decides where it applies
+
+def test_a_persons_alias_is_never_filler():
+    """`alias` is free text a PERSON chose. If somebody's alias is "unknown", that is their name.
+
+    A producer writing "unknown" is papering over a hole; a person writing it is answering the
+    question. Same string, different things, and what separates them is where it came from. The
+    risk of exempting it is nil: this check only ever refuses, so it cannot be tricked into
+    approving anything."""
+    for value in ("unknown", "example", "none", "tbd", ""):
+        cert = make_cert(gledger(QUIET_DAY))
+        cert["subject"]["alias"] = value
+        assert not find(cert), f"alias={value!r} was refused; a person's word is their word"
+
+
+def test_the_producers_own_fields_are_still_caught():
+    """CONTROL for the test above. Without it, exempting alias could have exempted everything."""
+    cases = [(("issuer", "buildHash"), "example"),
+             (("issuer", "buildHash"), "test"),
+             (("issuer", "version"), "1.0.0.0"),
+             (("session", "timezone"), ""),
+             (("commitment", "sealHash"), "unknown")]
+    for (block, field), value in cases:
+        cert = make_cert(gledger(QUIET_DAY))
+        cert[block][field] = value
+        assert find(cert), f"{block}.{field}={value!r} slipped through"
+
+
+# ---------------------------------------------------------------- the sweep, as a PROPERTY
+
+def _adversarial_event_names():
+    """Names nobody has chosen, crossed against everything these checks react to.
+
+    A sweep over the vocabulary that EXISTS asserts a RESULT, not a property: it passes because
+    nobody has picked a colliding name yet. `triggerEvent` is a passthrough on the emitting side -
+    it copies whatever the ledger row says, with no enum - so the set of possible values is not
+    the set of current ones. Production already shows 24 distinct issuer build hashes; event names
+    from older or future builds arrive the same way."""
+    suffixes = ["HASH", "LOSS", "LIMIT", "UTC", "AT_UTC", "VERSION", "MISMATCH", "BREACHED"]
+    prefixes = ["", "CONFIG_", "SEAL_", "DAILY_", "ACCOUNT_", "X_"]
+    names = {p + s for p in prefixes for s in suffixes}
+    for f in DECORATIVE_FILLER:
+        if f:
+            names |= {f, f.upper(), f"ACCOUNT_{f.upper()}"}
+    names |= {p + f for p in prefixes for f in ("UNKNOWN", "NONE", "NULL", "TBD", "TODO")}
+    return sorted(names)
+
+
+def test_no_event_name_can_make_a_certificate_fail_rule_five():
+    """§5.7: a lexical containment must match exactly what it forbids, and is TESTED AGAINST THE
+    LEGITIMATE VALUES IT COULD CATCH.
+
+    Both places an event name reaches the document: as a KEY of `reasons` (where the promise check
+    used to read it as a schema field name and accuse its own integer counter) and as a VALUE of
+    `triggerEvent` (where the filler list used to read it as the producer's own word). The two
+    holes are separate and needed separate fixes; this asserts both are shut."""
+    names = _adversarial_event_names()
+    assert len(names) > 100, "the generator stopped generating"
+
+    for ev in names:
+        cert = make_cert(gledger(QUIET_DAY))
+        cert["claims"]["failClosedEpisodes"] = [
+            {"fromSeq": 1, "toSeq": 2, "open": False, "reasons": {ev: 1},
+             "triggerSeq": 1, "triggerEvent": ev}]
+        assert not find(cert), f"the event name {ev!r} made an honest certificate fail rule 5"
+
+
+def test_the_sweep_is_capable_of_failing():
+    """CONTROL: the same generator, aimed at a field the PRODUCER owns, must light up.
+
+    Without this, the test above would pass just as well if `find()` had stopped working."""
+    caught = 0
+    for ev in _adversarial_event_names():
+        cert = make_cert(gledger(QUIET_DAY))
+        cert["issuer"]["buildHash"] = ev
+        if find(cert):
+            caught += 1
+    assert caught > 100, f"only {caught} names were caught in a producer field; the check is inert"
+
+
 def test_every_shipped_example_satisfies_the_rule_it_publishes():
     """The examples are what a reader learns the shape from, so they may not violate the rule the
     same package enforces."""
