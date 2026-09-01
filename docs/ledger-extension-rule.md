@@ -1222,6 +1222,79 @@ procedencia delante.
 
 ---
 
+## 5.12 — LA SUPERFICIE DEL CONTRATO, enumerada y medida
+
+**Un bloqueo cuyos límites nadie midió empieza a bloquear más de lo que le toca** (operador,
+1-sep). «Toca el contrato con la librería» se venía usando como bloqueo general sin que nadie
+probara dónde termina. Acá termina, medido.
+
+> **El contrato cubre lo que el verificador LEE, o lo que cambia una afirmación RECOMPUTADA.
+> Todo lo demás del payload es del emisor y no necesita acuerdo.**
+
+### Lo que el verificador lee de una fila del ledger — la lista completa
+
+| qué | dónde | por qué importa |
+|---|---|---|
+| `seq`, `tsUtc`, `event`, `prev`, `hash`, `schemaVersion` | dialecto y cadena | estructura; `_check_dialect` exige que estén, `hash_of` los hashea |
+| **el `payload` ENTERO** | `hash_of` | está dentro del cuerpo hasheado, así que cualquier cambio cambia el hash **de esa entrada** |
+| `payload.dayKey` | `:670` | ancla el chequeo de cobertura del día |
+| `payload.orderId` | `:1020` | distingue reintentos del mismo rechazo |
+| `payload.basis` (en `SEAL_EXPIRED`) | `:832` | `sealExpiryBasis`, una garantía positiva cuando dice monotonic |
+| `payload.fresh` (en `GUARDIAN_STARTED`) | `:873` | separa un primer arranque real de un segmento rotado |
+
+**Son CUATRO claves de payload, no dos.** El relevamiento que me llegó decía «`seq`, `tsUtc`,
+`event`, `payload.dayKey`, `payload.orderId`»: **le faltaban `basis` y `fresh`**, y `fresh` es
+justamente del evento que el ítem 3 quiere tocar.
+
+**Y son claves que muerden**, con el control construido en un escenario donde efectivamente se
+consultan (el primero que armé no disparó, porque el rango dejaba a `DAY_OPENED` adentro y la clave
+nunca se miraba — el control fallado se reporta, no se esconde):
+
+| | veredicto |
+|---|---|
+| `certificate-truncated.json` con `dayKey` intacto | **`RANGE_TRUNCATED`, exit 1** |
+| el mismo, con `dayKey` **renombrado** en el ledger | **exit 0, limpio** |
+| `fresh` presente | `indeterminateStarts: 0`, `coverageIsLowerBound: false` |
+| `fresh` renombrado o ausente | **`indeterminateStarts: 1`, `coverageIsLowerBound: true`** |
+
+Renombrar `dayKey` **apaga el chequeo de truncamiento** — la misma familia que DEF-4, por otra
+puerta.
+
+### Los cuatro pedidos en cola, clasificados
+
+| pedido | ¿cae bajo el contrato? | medido |
+|---|---|---|
+| **1. evento de acuse** | **SÍ** | un evento nuevo **no es inerte**: entra en `reasons` y puede quedar como `triggerEvent`. Insertado antes del `FAIL_CLOSED_ENTERED` da `triggerEvent: "HUMAN_ACK"` |
+| **2. `dayKey` en `CONFIG_LOADED`** | **NO** | agregarlo verifica limpio y no cambia ninguna afirmación. `dayKey` sólo se consulta en `DAY_OPENED`/`DAY_CLOSED` |
+| **3. `buildHash` en `GUARDIAN_STARTED`** | **NO para agregarlo — SÍ una condición** | agregarlo verifica limpio. Pero `fresh` vive en ese payload y **yo lo leo** (`:873`), y el evento se emite desde **dos sitios** con payloads distintos (`Guardian.cs:185` con `fresh`, `:214` sin él) |
+| **4. renombrar `exhausted` en `LOCKOUT_INCOMPLETE`** | **NO** | claims recomputados **idénticos**, continuidad **idéntica**, exit 0 con los dos nombres, y **los hashes de las entradas ya escritas no cambian** |
+
+**Tres de los cuatro salen.** El único que el contrato bloquea de verdad es el acuse, y lo bloquea
+por un motivo medido y no por precaución.
+
+### Sobre el hash, que es la pregunta que suele confundir
+
+Un campo de payload está **dentro** del cuerpo hasheado, así que renombrarlo cambia el hash **de
+las entradas que se escriban de ahí en adelante**. Las ya escritas **no se tocan**: conservan sus
+bytes y sus hashes, la cadena sigue verificando, y un ancla publicada antes sigue cubriendo su
+historia. Medido: 16 entradas viejas con hash idéntico, sólo la nueva difiere.
+
+**Eso no es un problema del contrato: es la cadena funcionando.** Un ledger cuyo esquema de payload
+evoluciona no necesita `schema_version` nuevo mientras el **cuerpo hasheado** —qué campos entran—
+no cambie (§5.1). Renombrar una clave *dentro* del payload no cambia qué entra: entra el payload.
+
+### La regla que queda, para el próximo caso
+
+**Antes de bloquear algo por «toca el contrato», medir si lo toca.** Concretamente: ¿el verificador
+lee esa clave, o el cambio altera una afirmación recomputada? Si ninguna de las dos, **no es del
+contrato** — puede seguir siendo mala idea por reglas del propio emisor (un campo sin lector es
+decorativo, §5.2.3), pero **eso lo decide el emisor solo y no espera a nadie.**
+
+Un bloqueo sin límites medidos es del mismo género que un proxy sin medir: **se cree porque nunca
+costó nada creerlo**, y el costo aparece como trabajo detenido que nadie atribuye al bloqueo.
+
+---
+
 # PARTE IV — LO QUE FALTA DEBAJO DE TODO
 
 ## 6. El verificador de la evidencia cita una especificación que nunca se versionó
