@@ -86,3 +86,25 @@ jobs:
           name: deadman-dist-${{ matrix.os }}
           path: dist/*
           if-no-files-found: error
+
+  line-endings:
+    # Not "is the repo uniform" - it is not, and that proxy was believed while being false for a
+    # year (see .gitattributes). This measures the damage itself: a change that rewrote a file's
+    # line endings, which turns a one-line edit into a whole-file diff and moves that file's git
+    # blame onto the editing commit. Ubuntu only: it reads git, not the platform.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the check needs the BEFORE side of the diff
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Endings unchanged in every modified file
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "no usable base ref (first push, or a force-push); nothing to compare"
+            exit 0
+          fi
+          python scripts/check_line_endings.py "$BASE" "${{ github.sha }}"

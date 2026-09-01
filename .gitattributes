@@ -10,7 +10,16 @@
 # endings, which still lands as a whole-file diff (measured again 2026-09-01: 3,075 lines for a
 # one-line change). Keep a file's own endings; check the diff size before committing.
 #
-# Whether to normalise is OPEN, not decided: cc776d1 rejected it because the conversion commit
-# would itself be a whole-repo rewrite, and that cost is real. What has changed is that it is
-# no longer a uniform state being protected.
+# NORMALISING IS CLOSED - decided 2026-09-01, and NOT for the reason cc776d1 gave.
+# That commit argued from "every blob is CRLF", false on the day it was written, and from
+# "the whole-repo rewrite this prevents", also false: measured, converting everything to CRLF
+# rewrites 27 of 67 text files and to LF rewrites 44 - never 67. The three reasons that hold:
+#   1. Normalising does not touch what did the damage. The 3,075-line diff came from an EDITOR
+#      rewriting endings, not from the repo being mixed; a uniform repo would not have stopped
+#      it either. What protects is the tool matching the file, and we do not control every tool.
+#   2. The blame cost is real, and it is 27 or 44 files - a true cost, not an inflated one.
+#   3. Nothing depends on uniformity. `* -text` stops git converting and never promised more.
+# What replaces it is a check on the property that matters instead of on a proxy for it:
+# scripts/check_line_endings.py refuses a change that altered a file's endings, in either
+# direction, mixed files included. Rule for an editor: keep the endings of the file you touch.
 * -text

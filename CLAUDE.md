@@ -96,10 +96,29 @@ No es de un caso: es la forma, de acá en más.
 4. **Cada resultado se etiqueta por lo que lo sostiene**: *medido* (verificable por un tercero) o
    *auto-atestiguado* (mi palabra sobre mi propio estado). Los dos pueden servir; **no se cobran
    como lo mismo.**
-5. **Las enmiendas se agregan debajo, fechadas y en su propio commit.** El texto sellado no se
-   edita en su lugar — un sello que se reescribe no es un sello.
+5. **Las enmiendas se agregan DEBAJO, fechadas y en su propio commit; el texto sellado NO se
+   toca.** Un sello que se edita en su lugar no es un sello. Vale incluso cuando quien pide el
+   cambio es quien lo aprobó: un tercero tiene que poder leer en el `git log` qué decía el
+   original y qué se le añadió, sin confiar en el relato de ninguno de los dos.
 
 Ejemplo vivo: `docs/prereg-episode-20260901.md`.
+
+## Un test sirve cuando mide la propiedad, no un proxy de ella
+
+**Antes de escribir un chequeo, preguntar: ¿esto mide el daño, o mide algo que suele acompañarlo?**
+Un proxy se puede creer durante años mientras es falso, porque nadie lo mide — es la propiedad la
+que duele, y nadie revisa el proxy hasta que el daño ocurre igual.
+
+**Caso que la originó (2026-09-01):** `.gitattributes` protegía «este repo es uniformemente CRLF».
+Medido, era falso el día que se escribió (21 de 46 blobs lo contradecían) y sigue siéndolo (23
+solo-LF y 4 mezclados de 67). El daño real nunca fue la falta de uniformidad: es **que una
+modificación cambie los finales de línea de un archivo que no venía a tocar**, con lo que un cambio
+de un renglón aterriza como un diff del archivo entero y mueve su `git blame`. La uniformidad era
+un proxy; el chequeo que la reemplaza (`scripts/check_line_endings.py`) mide la propiedad, sobre el
+único objeto donde es visible: el diff.
+
+**La prueba para aplicarla:** describir el daño en una frase que empiece con un verbo. Si el
+chequeo no puede fallar exactamente cuando esa frase es cierta, está midiendo otra cosa.
 
 ## Método, en corto
 
