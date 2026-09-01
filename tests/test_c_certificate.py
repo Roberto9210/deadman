@@ -619,8 +619,9 @@ def test_c17_a_crossed_dialect_fails_closed():
     entries = gledger(QUIET_DAY)
     cert = make_cert(entries, overrides={"ledgerDialect": "deadman-kit-v1"})
     rep = verify_certificate(cert, entries)
-    assert rep.exit_code == EXIT_CONTRADICTED
-    assert "DIALECT_MISMATCH" in codes(rep)
+    assert rep.exit_code == EXIT_UNEVALUABLE
+    assert "DIALECT_MISMATCH" in {f.code for f in rep.unevaluable}
+    assert not rep.contradictions
     assert "NOTHING_ELSE_CHECKED" in {f.code for f in rep.unverified}
 
 
@@ -628,7 +629,26 @@ def test_c17_the_other_crossing_too():
     entries = kledger(QUIET_DAY)
     cert = make_cert(entries, DEADMAN_KIT_V1, overrides={"ledgerDialect": "guardian-core-v1"})
     rep = verify_certificate(cert, entries)
-    assert "DIALECT_MISMATCH" in codes(rep)
+    assert "DIALECT_MISMATCH" in {f.code for f in rep.unevaluable}
+
+
+def test_c17_an_honest_certificate_cannot_be_smeared_with_the_wrong_ledger():
+    """The reason exit 1 was wrong here, as a case rather than as an argument.
+
+    Nobody touches the certificate. Handing the verifier a ledger in the other dialect used to
+    produce CONTRADICTED - "I caught you lying" - about a document that says nothing false. A
+    script reading only the exit code rejected an honest trader over someone else's file-picking
+    mistake. The control is the same certificate with its own ledger, which must still pass."""
+    entries = gledger(QUIET_DAY)
+    honest = make_cert(entries)
+
+    good = verify_certificate(honest, entries)
+    assert good.exit_code == EXIT_OK                    # control: it must be capable of passing
+
+    smeared = verify_certificate(honest, kledger(QUIET_DAY))
+    assert smeared.exit_code == EXIT_UNEVALUABLE
+    assert not smeared.contradictions, "an honest certificate must never be called a liar"
+    assert "DIALECT_MISMATCH" in {f.code for f in smeared.unevaluable}
 
 
 def test_c17_an_undeclared_dialect_is_unevaluable_not_guessed():
@@ -699,21 +719,42 @@ def test_c18_the_cli_output_is_ascii_safe():
 
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
-    Every attack in this file must produce at least one named contradiction."""
+    Every attack here must be REFUSED - never exit 0 - and must name what it found.
+
+    Refusal has two channels and they are not interchangeable. Four of these are the certificate
+    saying something the ledger denies, and those are contradictions (exit 1). The crossed
+    dialect is not: the verifier cannot tell a certificate that lies about its dialect from an
+    honest certificate handed the wrong file, because the two produce identical input. So it
+    reports UNEVALUABLE (exit 2) - still a refusal, never a pass. The price is named rather than
+    hidden: a certificate that genuinely lies about its dialect is no longer called a liar. That
+    price is paid on purpose, because the alternative punishes the honest holder."""
     entries = gledger(BREACH_DAY)
-    attacks = {
+    lies = {
         "claim": make_cert(entries, overrides={"claims.lockoutsTriggered": 0}),
         "trust": make_cert(entries, trust="L3"),
-        "dialect": make_cert(entries, overrides={"ledgerDialect": "deadman-kit-v1"}),
         "limitations": make_cert(entries, overrides={"limitations": []}),
         "certhash": {**make_cert(entries), "certHash": "0" * 64},
     }
-    for name, cert in attacks.items():
+    indistinguishable = {
+        "dialect": make_cert(entries, overrides={"ledgerDialect": "deadman-kit-v1"}),
+    }
+
+    for name, cert in {**lies, **indistinguishable}.items():
         rep = verify_certificate(cert, entries)
-        assert rep.contradictions, f"{name} was not refused"
+        assert rep.exit_code != EXIT_OK, f"{name} was not refused"
+        assert rep.contradictions or rep.unevaluable, f"{name} refused without naming anything"
+
+    for name, cert in lies.items():
+        rep = verify_certificate(cert, entries)
+        assert rep.contradictions, f"{name} must be a contradiction"
         assert rep.exit_code == EXIT_CONTRADICTED, name
         if name == "trust":
             assert rep.reached_level == "L1" and rep.declared_level == "L3"
+
+    for name, cert in indistinguishable.items():
+        rep = verify_certificate(cert, entries)
+        assert rep.exit_code == EXIT_UNEVALUABLE, name
+        assert not rep.contradictions, f"{name} must not accuse: it cannot tell who is at fault"
 
 
 # ------------------------------------------------- the reachable layer is named, 0.2.2

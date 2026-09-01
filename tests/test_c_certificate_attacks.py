@@ -18,7 +18,8 @@ from __future__ import annotations
 import hashlib
 
 from deadman.verify_certificate import (
-    EXIT_CONTRADICTED, EXIT_OK, REQUIRED_LIMITATIONS, _cert_preimage,
+    EXIT_CONTRADICTED,
+    EXIT_UNEVALUABLE, EXIT_OK, REQUIRED_LIMITATIONS, _cert_preimage,
     verify_certificate, verify_series,
 )
 
@@ -93,9 +94,9 @@ def test_attack_a_ledger_that_changes_dialect_halfway_down():
     entries[4] = kledger(QUIET_DAY)[4]                # one kit-shaped line in a guardian file
     rep = verify_certificate(make_cert(gledger(QUIET_DAY)), entries)
 
-    assert rep.exit_code == EXIT_CONTRADICTED
-    assert "DIALECT_MISMATCH" in codes(rep)
-    assert "entry 5" in " ".join(f.detail for f in rep.contradictions)
+    assert rep.exit_code == EXIT_UNEVALUABLE
+    assert "DIALECT_MISMATCH" in {f.code for f in rep.unevaluable}
+    assert "entry 5" in " ".join(f.detail for f in rep.unevaluable)
 
 
 def test_attack_ledger_lines_reordered():

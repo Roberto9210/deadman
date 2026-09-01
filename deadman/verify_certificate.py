@@ -1124,7 +1124,12 @@ def verify_certificate(cert: Mapping[str, Any],
 
     mismatch = _check_dialect(ledger_entries, dialect)
     if mismatch:
-        rep.contradict("DIALECT_MISMATCH", mismatch)
+        # UNEVALUABLE, not CONTRADICTED. Nothing was measured here: the verifier refused to look
+        # at a file that is not the one the certificate declares. Exit 1 means "I caught you
+        # lying"; this is "I could not look". Collapsing them lets anyone smear an honest
+        # certificate by handing over the wrong ledger - the same failure the exit-code table
+        # warns about, pointed at the holder instead of at the tool.
+        rep.cannot_evaluate("DIALECT_MISMATCH", mismatch)
         rep.declared_level = cert.get("trustLevel")
         rep.cannot_verify("NOTHING_ELSE_CHECKED",
                           "verification stopped at the dialect check; no claim was recomputed")

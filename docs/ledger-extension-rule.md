@@ -782,7 +782,7 @@ vocabulario de producción.
 **Nada.** Sólo existe un chequeo de **presencia**: `_check_dialect` (`:520-538`) exige que estén
 los campos de `dialect.required` en **todas** las entradas. Sobre las claves de más no dice nada,
 porque nunca las mira. Que el chequeo de presencia muerde, medido: una entrada nueva **sin**
-`payload` da `DIALECT_MISMATCH`, exit **1**, más `NOTHING_ELSE_CHECKED`.
+`payload` da `DIALECT_MISMATCH` más `NOTHING_ELSE_CHECKED`. *(Medido entonces como exit 1; **hoy es exit 2** — ver §6bis: la ruta se re-ruteó a `cannot_evaluate` el 1-sep, y es el único cambio de código de esta tanda.)*
 
 **La regla 5 no protege el ledger.** `check_rule_five` se llama sólo sobre el certificado (`:1212`,
 `:1476`). El receptor exige que el certificado no tenga campos decorativos, y no exige nada de la
@@ -1320,12 +1320,12 @@ falso en los seis casos:
 | `ledgerDialect` desconocido | 2 | **NO** |
 | sin `claims.ledgerRange` | 2 | **NO** |
 | `ledgerRange` con `fromSeq > toSeq` | 2 | **NO** |
-| dialecto declarado ≠ el del archivo | **1** | **NO** |
+| dialecto declarado ≠ el del archivo | **1** ⇒ **2** (arreglado, §6bis) | **NO** |
 
 **Cinco de seis rutas ya lo saltean**, y una de ellas emite un **veredicto** (exit 1) sin haberlo
 comprobado nunca.
 
-En descargo del código: **todas esas rutas declaran que se detuvieron** — `cannot_evaluate` en las
+**La sexta fila resultó ser un código de salida mal ruteado, no sólo un salteo, y se arregló** (§6bis). En descargo del resto: **todas esas rutas declaran que se detuvieron** — `cannot_evaluate` en las
 de exit 2, y `NOTHING_ELSE_CHECKED` explícito en la de exit 1 (`:1129`). Es §5.8 escalón 4 bien
 hecho, ya. **Pero declarar que un chequeo no corrió no es lo mismo que garantizar que corre**, y el
 ranking bajo de `certHash` depende de la garantía, no de la declaración.
@@ -1476,6 +1476,73 @@ Para cuando aparezca el primer caso ambiguo (operador, 1-sep):
 §6 desde el lado del consumidor significa que la coincidencia observada hasta hoy **no era acuerdo
 sino falta de ocasión** — y ésa es exactamente la forma que §5.11 no puede distinguir desde afuera,
 porque desde afuera se ve idéntica al acuerdo genuino.
+
+## 6bis. Dos invariantes documentados que no se cumplían
+
+### El que se arregló: `DIALECT_MISMATCH` devolvía «te agarré mintiendo»
+
+La doc pública lo dice normativamente, y es la regla que el propio repo se puso
+(`docs/verify-certificate.md`):
+
+> **«1 and 2 are kept apart on purpose.»** *«I caught you lying»* y *«I could not look»* son
+> hechos distintos, **y una herramienta que los colapsa se puede deshabilitar entregándole un
+> archivo roto.**
+
+`DIALECT_MISMATCH` devolvía **1**. Nada se había medido: el verificador se **negó a mirar** un
+archivo que no es el que el certificado declara.
+
+**Y el argumento decisivo no es la simetría sino la dirección del daño**, medido:
+
+| | veredicto |
+|---|---|
+| certificado **honesto**, con **su** ledger | exit 0 |
+| **el mismo certificado honesto**, con el archivo **equivocado** | **exit 1, `DIALECT_MISMATCH`** |
+
+**Nadie tocó el certificado.** Alcanzaba con entregar otro archivo para que el veredicto publicado
+fuera `CONTRADICTED` sobre un documento honesto — y quien automatiza esto escribe
+`if exit != 0: rechazar`, así que la declaración `NOTHING_ELSE_CHECKED` que sí estaba **vive en la
+prosa mientras el veredicto vive en el código de salida**. Es la advertencia de la propia tabla,
+apuntada al tenedor del documento en vez de a la herramienta.
+
+**Arreglado** (único cambio de código de esta tanda): `rep.contradict(...)` → `rep.cannot_evaluate(...)`.
+
+**El precio, nombrado y no escondido:** un certificado que **sí** miente sobre su dialecto ya no
+se llama mentiroso, porque **el verificador no puede distinguirlo de un certificado honesto al que
+le dieron el archivo equivocado** — los dos producen la misma entrada. Se paga a propósito: §5.3
+dice que acusar a un documento honesto es catastrófico.
+
+Y salió un test que faltaba: `test_c17_an_honest_certificate_cannot_be_smeared_with_the_wrong_ledger`,
+con su control (el mismo certificado con su propio ledger, que debe seguir pasando). La
+meta-garantía de que *«un verificador que sólo dice OK es un sello de goma»* quedó **más fuerte**:
+ahora exige que todo ataque sea rechazado **y nombre algo**, y separa los cuatro que son mentiras
+del que es indistinguible.
+
+*(No fue «de un renglón», y por qué no lo fue es informativo: la decisión vieja estaba codificada
+en **tres** lugares del test suite, uno de ellos la meta-garantía. Un cambio de una línea que toca
+tres aserciones es un cambio de contrato disfrazado de typo.)*
+
+### El que sigue sin cumplirse: `.gitattributes` dice que todos los blobs son CRLF
+
+Encontrado **por romperlo**: mi primer intento de parche reescribió `verify_certificate.py` entero
+(3.075 líneas de diff para un cambio de una) porque `write_text` normalizó los finales de línea.
+
+El `.gitattributes` del repo dice, textualmente:
+
+> *«Every blob in this repo is CRLF; `* -text` stops git converting endings, so an edit that keeps
+> them no longer rewrites the file and moves its blame.»*
+
+**Medido contra los blobs almacenados: 26 de 71 archivos tienen líneas LF**, incluido
+`deadman/verify_certificate.py` — **entero**, 1.535 líneas. Y **cuatro archivos de test están
+mezclados adentro**: `test_c_certificate_example.py` (206 CRLF + 38 LF), `test_c_continuity.py`
+(372 + 28), `test_g11_ledger.py` (294 + 49), `test_g12_clock_and_paths.py` (49 + 45).
+
+**La afirmación es falsa, y su falsedad produce exactamente el daño que el archivo existe para
+evitar**: la premisa de `* -text` es que todo es CRLF, así que una herramienta que normaliza
+reescribe el archivo y mueve el blame — que es lo que me acaba de pasar.
+
+**No lo arreglo**: re-normalizar 26 archivos es precisamente el commit que ese comentario dice que
+no quiere. Es una decisión, no una tarea. Queda anotado con sus números para que se decida:
+corregir los blobs, o corregir la frase.
 
 ## 7. Estado de los pedidos del emisor
 

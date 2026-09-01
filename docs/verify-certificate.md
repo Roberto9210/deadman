@@ -133,7 +133,7 @@ Exit 2 — and that is a different fact from exit 1, which is the next section.
 |---|---|---|
 | **0** | **VERIFIED** at the layer printed | Nothing in the document contradicts the ledger. Now read the *could not verify* list, because that is where the real limits are |
 | **1** | **CONTRADICTED** | Something in the certificate does not survive its own evidence. The findings are named, one per line |
-| **2** | **UNEVALUABLE** | The verifier could not look: unreadable file, invalid JSON, no declared range, undeclared dialect. **Nothing was proved and nothing was disproved** |
+| **2** | **UNEVALUABLE** | The verifier could not look: unreadable file, invalid JSON, no declared range, undeclared dialect, or a ledger that is not in the dialect the certificate declares. **Nothing was proved and nothing was disproved** |
 
 **1 and 2 are kept apart on purpose.** "I caught you lying" and "I could not look" are different
 facts, and a tool that collapses them can be disabled by handing it a broken file. If you are
