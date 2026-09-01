@@ -298,6 +298,15 @@ El emisor tiene seis lugares con `?? ""` y el arreglo correcto es omitir la clav
 | `timezone` **ausente** | exit 0, limpio |
 
 Así que el `?? ""` **ya está produciendo certificados que fallan** — la corrección no es cosmética.
+
+> **CONFIRMADO DESDE LOS DOS LADOS (2026-09-01).** Nosotros medimos que `""` da exit 1 con
+> `DECORATIVE_FIELD`; el lado del guardián confirma que `session.timezone` **sale vacío hoy** por
+> la ruta de LT-2 — el reinicio que restaura `ARMED` desde el sello. Es decir: no es un borde
+> teórico ni un descuido de estilo, es **un camino que el producto recorre normalmente**.
+>
+> Eso lo cambia de categoría: de **defecto de honestidad** a **falla funcional en ruta
+> alcanzable**, y por eso sube en el orden de trabajo (§8). Un certificado emitido después de un
+> reinicio normal falla la verificación.
 Pero `dayKey` vive en el mismo objeto `session`, y ahí omitir desarma una protección. **El mismo
 patrón de arreglo, aplicado a dos campos vecinos, da un resultado correcto y un desastre.**
 
@@ -422,11 +431,78 @@ tenía que no contradecirla.
 | `reasons` con `CONFIG_HASH`, `SEAL_HASH`, `DAILY_LOSS`, `SOFT_LIMIT`, `EXPIRES_AT_UTC` | de `FIELD_BELIES_ITS_NAME` a **limpio**, los cinco |
 | `buildHash: "example"` / `"latest"`, `sealHash: "abc123"`, `armedAtUtc: "this morning"`, `personalDailyLossLimit: 600`, `version: "1.0.0.0"` | **se siguen atrapando**, los seis |
 
-**Y la prueba que la cierra de verdad**, que es §5.7 obligación 2 hecha mecánica: un test que barre
-**el vocabulario entero de eventos** a través de la regla 5 y exige cero hallazgos. Lo que hice a
-mano una vez, corriendo en CI para siempre. Necesita el vocabulario completo del guardián — ítem 6
-del aviso. Con la inversión aplicada ese test pasa por construcción, y sigue valiendo: es lo que
-detecta el día en que alguien agregue un nombre de esquema que colisione.
+### La inversión es NECESARIA y NO ALCANZA — corrección, con lo que la destapó
+
+Escribí que «con la inversión aplicada ese test pasa por construcción». **Medido, es falso**, y lo
+que lo destapó vino del lado del guardián: `triggerEvent` es un **pasamanos** (`Certificate.cs:223`),
+copia lo que la fila diga sin validar contra ningún enum. O sea que un nombre de evento no llega
+sólo como **clave** de `reasons` — llega también como **valor** de un campo de cadena. Y
+`DECORATIVE_FILLER` chequea **todos** los valores de cadena, por cualquier path.
+
+La inversión arregla `_promise_violations`, que es la mitad de las claves. No toca la otra mitad.
+Medido sobre 144 nombres generados adversarialmente:
+
+| | hoy | con la inversión sola | con la inversión + procedencia |
+|---|---|---|---|
+| como **clave** de `reasons` | **31 fallan** | 0 | 0 |
+| como **valor** de `triggerEvent` | **44 fallan** | **44 fallan** | 0 |
+
+Los 44 son nombres como `UNKNOWN`, `NONE`, `TBD`, `CHANGEME`, `BAR`, `1.0.0.0`. Ninguno existe hoy;
+todos son nombres que alguien puede elegir mañana. **Sin el aporte del otro lado habría entregado
+medio arreglo con un test que pasaba.**
+
+### — RULING — la regla 5 se aplica según la PROCEDENCIA del campo
+
+> **El chequeo de relleno se aplica a los campos que llena el PRODUCTOR. Nunca a los que aporta una
+> PERSONA.**
+>
+> Un productor que escribe `"unknown"` está tapando un hueco. Una persona que escribe `"unknown"`
+> está diciendo su nombre. Es la misma cadena y son cosas distintas, y lo que las distingue es **de
+> dónde vino**.
+
+La taxonomía completa que hace falta para escribir el arreglo, con la tercera procedencia que sale
+del pasamanos:
+
+| procedencia | ejemplos | qué chequeo corresponde |
+|---|---|---|
+| **el productor la redacta** | `buildHash`, `version`, `sealHash`, `session.timezone` | **relleno SÍ.** Es su palabra, y un relleno ahí tapa un hueco |
+| **una persona la aporta** | `subject.alias` | **relleno NO.** Su alias es su nombre. Que el producto le diga a un usuario que su nombre es inválido sería absurdo, y el riesgo de excluirlo es nulo: el chequeo sólo rechaza, no se lo puede engañar para que apruebe |
+| **se copia de la evidencia** | `triggerEvent`/`precedingEvent`, claves de `reasons` y de `byType` | **relleno NO — se COMPARA contra el ledger**, que es estrictamente más fuerte. Juzgar su forma es juzgar el vocabulario ajeno; compararlo prueba que el certificado dice lo que la evidencia dice |
+
+La tercera fila es la que cierra los 44, y encaja con el ruling de DEF-2 parte 2: `precedingEvent`
+**se compara**. Un campo que se verifica por comparación no necesita —y no debe— verificarse por
+forma.
+
+### La prueba: una PROPIEDAD, no un conjunto
+
+**El barrido no debe probar «estos 37 no colisionan». Eso probaría un resultado.** Producción ya
+tiene 24 `buildHash` distintos en 8.027 entradas, y un ledger real puede traer nombres de builds
+viejos o futuros. El conjunto de hoy no es una propiedad — es la lección de toda la tanda.
+
+El test se escribe así:
+
+> **Ningún nombre de evento, sea cual sea, puede hacer que un certificado falle la regla 5 — ni
+> como clave de `reasons`, ni como valor de `precedingEvent`.**
+
+y se corre contra nombres **generados adversarialmente**: cada sufijo al que reaccionan las
+promesas (`HASH`, `LOSS`, `LIMIT`, `UTC`, …) cruzado con cada palabra de `DECORATIVE_FILLER`,
+cruzado con los prefijos que un vocabulario real produce. Los 144 de la tabla de arriba son ese
+generador. La enumeración del guardián sigue siendo útil —como caso de humo y para no confundir una
+fixtura con relleno— pero **no es lo que el test asegura.**
+
+**Nota para quien lo escriba:** los C-tests del guardián emiten `buildHash: "test"`. Eso **debe**
+seguir disparando `DECORATIVE_FIELD` — `"test"` en un campo que el productor redacta es relleno de
+verdad. Lo que no hay que hacer es cosechar valores de la salida de esos tests como si fueran
+vocabulario de producción.
+
+### Medido, todo junto
+
+| | resultado |
+|---|---|
+| propiedad 1, 144 nombres adversariales, clave y valor | **0 fallan** (hoy: 31 y 44) |
+| `subject.alias` = `"unknown"` / `"example"` / `"none"` | **limpio** (hoy: `DECORATIVE_FIELD`) |
+| `buildHash` = `"example"` / `"test"`, `timezone` = `""`, `version` = `"1.0.0.0"` | **se siguen atrapando**, los cuatro |
+| suite entera del certificado, 5 archivos | **100/100 pasan** |
 
 ---
 
@@ -845,22 +921,32 @@ porque hoy cita cuatro secciones de un documento que no tiene.
 
 ## 8. — RULING — Orden de trabajo
 
-1. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
-   limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3).
-2. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
+0. **`session.timezone: ""`, del lado del emisor** — es la única falla **funcional** de la lista y
+   ya se dispara sola por la ruta LT-2. No depende de nosotros y no hay que esperar a nada: campo
+   ausente o `null`. Va en cero porque cada certificado emitido tras un reinicio normal está
+   fallando mientras esto no salga.
+1. **DEF-3, las dos mitades** — la inversión **y** la procedencia. Sube de sexto a primero: es lo
+   único que hoy hace **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros
+   tres defectos dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el
+   verificador.
+2. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
+   limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
+   comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
+3. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
+   `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
+   limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
+4. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
    inyección top-level como control.
-3. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
-4. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify` (§5.8 escalón 4), con
-   `certificate-truncated.json` sin `dayKey` como control. **Sube a este puesto por calendario**:
-   el emisor está por limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
-5. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
-6. **DEF-3** — que las promesas de la regla 5 no bajen a claves de datos, más el barrido del
-   vocabulario entero como test de regresión (§5.7 obligación 2). Necesita el ítem 6 del aviso.
+5. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
+6. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
 7. Escribir §5 donde se decida en §6.
 8. Recién entonces, el evento de acuse.
 
-**DEF-2 va primero porque NO NECESITA ADVERSARIO:** emite falsedades hoy, en operación normal, sin
-que nadie haga nada. DEF-1 es un agujero que alguien tendría que usar.
+**El criterio de orden, ahora que son cuatro y llegó el dato de LT-2:** primero lo que ya está
+roto en operación normal, sin adversario; después lo que emite falsedades; al final lo que abre un
+agujero que alguien tendría que ir a usar. DEF-2 sigue por delante de DEF-1 por ese motivo, y
+`timezone` y DEF-3 se les adelantan a los dos porque no requieren siquiera que alguien mienta:
+**fallan solos, sobre contenido honesto.**
 
 > **Un documento que ya está equivocado es peor que un agujero que nadie abrió.**
 

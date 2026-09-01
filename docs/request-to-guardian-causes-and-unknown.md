@@ -72,8 +72,16 @@ preserve that; the string `"unknown"` would have destroyed it by looking like an
 
 ### The good news first, measured
 
-`?? ""` is not cosmetic. It is **already producing certificates that fail.** On `session.timezone`,
-which is one of the six:
+**CONFIRMED FROM BOTH SIDES, and it changes category.** We measured that `""` gives exit 1 with
+`DECORATIVE_FIELD`. You confirm `session.timezone` comes out empty **today**, through the LT-2 path
+— the restart that restores `ARMED` from the seal.
+
+So this is not a theoretical edge and not untidiness: **it is a functional failure on a path the
+product walks normally.** A certificate issued after an ordinary restart fails verification. It has
+moved from "honesty defect" to the top of our work order — it is the only item on either side's
+list that is already breaking, by itself, with nobody doing anything wrong.
+
+On `session.timezone`, which is one of the six:
 
 | what the emitter writes | verdict |
 |---|---|
@@ -293,9 +301,52 @@ We swept the 27 event names we can see plus our own 19 kinds: **zero collisions 
 We are fixing the check on our side. **We also want the test that keeps it fixed**, and that test
 needs your vocabulary.
 
-### The ask
+### ANSWERED — and the answer changed the ask
 
-Two lists, as plain enumerations — no code, no schema, just the names:
+**The enumeration arrived, and the most valuable thing in it was not the list.** It was this:
+`triggerEvent` is a **passthrough** (`Certificate.cs:223`) — it copies whatever the ledger row says
+with no validation against any enum.
+
+That killed the test we were about to write. A sweep asserting *"these 37 names do not collide"*
+asserts a **result**. A real ledger can carry names from older or future builds — production
+already shows 24 distinct `buildHash` values across 8,027 entries — so the set of today is not a
+property.
+
+**And it exposed a hole our own fix would not have closed.** We had proposed inverting the
+promise-check so it only applies to schema-owned names. Measured against 144 adversarially
+generated names:
+
+| a name arriving as… | today | with our inversion alone | with inversion + provenance |
+|---|---|---|---|
+| a `reasons` **key** | **31 fail** | 0 | 0 |
+| a `triggerEvent` **value** | **44 fail** | **44 fail** | 0 |
+
+The inversion fixes keys. `triggerEvent` is a *value*, and the filler check reads every string
+value on every path. Names like `UNKNOWN`, `NONE`, `TBD`, `CHANGEME` — none of which exist today,
+all of which someone could choose tomorrow. **Without your note we would have shipped half a fix
+with a test that passed.**
+
+So the fix is scoped by **provenance**, and `triggerEvent`/`precedingEvent` is not shape-checked at
+all — it is **compared against the ledger**, which is strictly stronger and is already item 2's ask.
+
+`subject.alias` is excluded on the same principle and **the emitter should not refuse it either**:
+
+> **The filler check applies to fields the PRODUCER fills. Never to fields a PERSON supplies.**
+
+A producer writing `"unknown"` is papering a hole. A person writing `"unknown"` is telling you their
+name. Same string, different things, and what separates them is where it came from.
+
+Measured: `alias` = `"unknown"` / `"example"` / `"none"` now verify clean, while `buildHash`
+= `"example"` or `"test"`, `timezone` = `""` and `version` = `"1.0.0.0"` are still caught. Whole
+certificate suite: 100/100.
+
+**One note for whoever reads the sweep:** your C-tests emit `buildHash: "test"`. That **must** keep
+firing `DECORATIVE_FIELD` — `"test"` in a field the producer writes is genuine filler. The point is
+only not to harvest values out of those tests as if they were production vocabulary.
+
+### The residual ask
+
+The lists are still worth having, as a smoke case rather than as the guarantee:
 
 1. **Every event name the guardian can emit.** We assembled 27 from what is visible in this
    repository and we have no way to know whether that is all of them.
