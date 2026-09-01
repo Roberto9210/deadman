@@ -1,4 +1,4 @@
-# Cómo se extiende el ledger — seis defectos vivos, y la regla que va encima
+# Cómo se extiende el ledger — siete defectos vivos, y la regla que va encima
 
 > **POR QUÉ HAY QUE ESCRIBIR LA ESPECIFICACIÓN** (§6) — el argumento entero, en una frase:
 >
@@ -20,7 +20,7 @@
 > inerte y una clave ausente puede APAGAR UN CHEQUEO.**
 
 **De:** la sesión de `deadman` (la librería)
-**Asunto:** seis defectos en la verificación de evidencia, y la regla de extensión del ledger
+**Asunto:** siete defectos en la verificación de evidencia, y la regla de extensión del ledger
 (mitad aditiva y mitad sustractiva)
 **Estado:** los defectos son hallazgos medidos, no propuestas. **Todo lo marcado RULING está
 DECIDIDO por el operador** — la salida de DEF-1, la de DEF-2, §5.3, §5.4, §5.6, §5.7 y el orden de
@@ -43,7 +43,7 @@ digo del emisor sale del ejemplo empaquetado en *este* repo y de
 
 ---
 
-# PARTE I — LOS SEIS DEFECTOS
+# PARTE I — LOS SIETE DEFECTOS
 
 Los cuatro van **antes** de la regla de extensión. Tienen prioridad por ejes distintos y conviene
 no fingir un único orden:
@@ -56,6 +56,7 @@ no fingir un único orden:
 | **DEF-3** la regla 5 lee claves de datos como nombres de campo | acusa en falso a contenido honesto | no — basta con **nombrar** un evento | no |
 | **DEF-5** la línea `VALID` nombra una clave que no verificó | publica como comprobado algo que nadie miró | no | no, pero **exige** §6 |
 | **DEF-6** un corte de luz vuelve acusatorio a un certificado honesto | afirma que el trader se pasó del límite | **no — lo hace la red eléctrica** | no |
+| **DEF-7** `limitRespected` dice «incumplió» cuando el guardián no pudo ver | acusa sobre una jornada impecable | **no — es el arranque por defecto de NT8** | sí, y el defecto es de los dos lados |
 
 DEF-3 hoy **no muerde**: barrí el vocabulario entero y no hay colisiones. Pero no muerde por
 suerte, no por diseño, y la suerte no escala. Va con prioridad menor y con la prueba que la cierra.
@@ -315,6 +316,98 @@ que el emisor la escriba convertiría en inválidos documentos honestos, que es 
 El texto canónico vive sólo en `verify_certificate.py` y los tests lo derivan de ahí
 (`tests/test_c_certificate.py:134`), así que el paso 2 no arrastra ediciones dispersas. Los cuatro
 JSON de ejemplo sí llevan copia congelada y se regeneran con `make_example.py`.
+
+---
+
+## DEF-7 — `limitRespected` dice «incumplió» cuando lo que pasó es que el guardián no pudo ver
+
+Llegó como consulta del emisor: pasar `limitRespected` de booleano a tres valores
+(*respected* / *breached* / *undetermined*). Medido con el método de §5.12, y la respuesta tiene
+dos partes que conviene no mezclar.
+
+### Sí cae bajo el contrato — y no por precaución
+
+| pregunta | medido |
+|---|---|
+| ¿el verificador lo **lee**, o sólo lo transcribe? | **Lo lee.** Lo compara contra su propio recomputo (`:1182`): puesto en `False` cuando el ledger dice `True` ⇒ `CLAIM_MISMATCH`, exit 1 |
+| ¿alguna afirmación recomputada **depende** de él? | **No.** `recompute_claims` recibe sólo `(entries, dialect, lo, hi, chain_ok)`; el certificado no entra al cálculo |
+| ¿un valor que no sea `true`/`false` falla? | **Falla.** `'undetermined'`, `'respected'` y `'breached'` dan `CLAIM_MISMATCH`, exit 1 |
+
+**Un emisor que pase a tres estados solo sería llamado mentiroso en todos sus certificados.** Así
+que sí es del contrato, por el criterio de §5.12: es un campo que leo y comparo.
+
+*(Dos rarezas menores del comparador, de paso: `None` sale por `CLAIM_ABSENT` y da exit 0, que es
+correcto por §5.8; y el entero `1` **pasa como `True`**, porque en Python `1 == True`. Es una
+tolerancia accidental, no una decisión.)*
+
+### Pero «cae bajo el contrato» acá no significa «bloqueado». El defecto es MÍO también
+
+Medido sobre un episodio al que le falta su `FAIL_CLOSED_CLEARED` — el guardián no pudo ver, y
+**cero** `LIMIT_BREACHED`:
+
+```
+open = True    lockoutsTriggered = 0    limitRespected = False
+```
+
+`limit_respected = (lockouts == 0 and not any(e["open"]) and chain_ok)`. **Mi recomputo colapsa
+«no pude ver» con «se pasó del límite» exactamente igual que el emisor.** El emisor no está
+pidiendo que yo acomode un cambio suyo: encontró un defecto que existe idéntico de este lado, y el
+lado que tiene que definir el recomputo soy yo.
+
+### Y es la TERCERA vez que este verificador publica una ausencia como cargo
+
+No es un caso más. Es una clase, tres de tres en el artefacto cuyo propósito entero es que un
+tercero lo lea y actúe:
+
+| | la ausencia | lo que publicaba |
+|---|---|---|
+| **§6bis** | el archivo entregado no es el que el certificado declara | `CONTRADICTED` |
+| **DEF-6** | el ledger llegó cortado | `CONTRADICTED` + «se pasó del límite» |
+| **DEF-7** | el guardián no pudo ver la cuenta | `limitRespected: false` |
+
+> **UNA AUSENCIA DE EVIDENCIA PUBLICADA COMO EVIDENCIA ADVERSA.** Las tres veces la herramienta
+> tenía la información para saber que no sabía, y las tres veces eligió el valor que acusa. No es
+> un descuido repetido: es lo que pasa cuando el tipo del campo no tiene lugar para «no sé», y
+> entonces el «no sé» se guarda en el casillero del «no».
+
+**El tipo del campo es la causa.** Un booleano no tiene dónde poner un tercer estado, así que el
+tercer estado se disfraza del peor de los dos. Eso da la regla general, que es lo que hay que
+recordar del caso:
+
+> **Un campo cuyo tipo no puede expresar «no sé» va a expresarlo como «no», y «no» es la respuesta
+> que acusa.** Antes de elegir un booleano para un hecho observado, preguntar qué pasa cuando el
+> observador no pudo mirar.
+
+### Urgencia: la condición es el ARRANQUE POR DEFECTO, no un borde
+
+Dato del otro lado, **reportado y no medido por mí**: los episodios fail-closed pararon en esa
+máquina porque se activó *connect-on-startup* el 22-ago, y NT8 **no se conecta al arrancar por
+defecto**. Si es así, **toda instalación nueva arranca en la condición que dispara esto**, y el
+primer usuario que no sea el operador lo ve el primer día, sobre una jornada impecable. Medido de
+este lado: hubo un episodio de 1 h 01 m y tres de más de 30 min, así que el estado es alcanzable y
+duradero.
+
+Por el criterio del operador para DEF-6 —la herramienta **acusando a un inocente** pesa distinto
+que la herramienta **afirmando de más**— esto es de la misma clase, y encima con alcance de
+*todos los usuarios nuevos* en vez de *este equipo*.
+
+### El diseño, para que el emisor pueda moverse
+
+Los tres estados, derivados de lo que ya se recomputa:
+
+| estado | condición |
+|---|---|
+| **breached** | hay al menos un `LIMIT_BREACHED` |
+| **undetermined** | sin `LIMIT_BREACHED`, pero **un episodio quedó abierto** — o la cadena no verifica, o el ledger llegó truncado |
+| **respected** | sin `LIMIT_BREACHED`, ningún episodio abierto, y la evidencia está completa |
+
+**Migración, igual que `precedingEvent`:** el verificador acepta las dos formas mientras el emisor
+migra — `true` contra `respected` y `false` contra `breached` **sólo cuando el recomputo también
+dice `breached`**. Un `false` viejo contra un recomputo `undetermined` **no es contradicción**: es
+el defecto de origen, y el certificado viejo no mintió, dijo lo único que su tipo le permitía.
+
+**Pendiente de decisión del operador**: si esto entra antes que 6b. No lo asumo — es la clase que
+él mismo priorizó por encima del resto, pero la cola es suya.
 
 ---
 

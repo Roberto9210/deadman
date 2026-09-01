@@ -160,6 +160,33 @@ aparece en dominios que no se hablan, lo cual vale. Lo que no queda probado: que
 distinto lo hubiera visto. Un tercer camino independiente **de observador** — alguien que no sea
 esta casa encontrando la misma forma — es lo que cerraría eso, y no lo tenemos.
 
+## Un control que no dispara invalida la SECCIÓN, no el HALLAZGO
+
+**Es la diferencia entre una medición que se DESCARTA y una que se REHACE**, y sin la distinción
+escrita un control fallado se lee como que el hallazgo era falso.
+
+Cuando el par control/caso no diverge, lo que quedó probado es que **el instrumento no estaba
+apuntando**: no se aprendió nada, ni a favor ni en contra. El hallazgo sigue exactamente donde
+estaba — ni confirmado ni refutado — y lo que hay que hacer es **construir el control bien**, no
+retirar la afirmación.
+
+**Y el control fallado se reporta.** Esconderlo deja una sección que se lee como medida cuando no
+lo está.
+
+**Los dos casos del mismo día (2026-09-01):**
+
+- Renombré `payload.dayKey` esperando que el veredicto cambiara y no cambió. **El control estaba
+  mal armado**: el rango declarado dejaba `DAY_OPENED` adentro, así que la clave no se consultaba
+  nunca. Rehecho sobre `certificate-truncated.json`, donde sí se consulta, disparó — de
+  `RANGE_TRUNCATED` exit 1 a exit 0 limpio.
+- En DEF-6, el control se construyó a propósito para separar cuatro casos (cortado, adulterado,
+  cortado *y* adulterado, hueco en el medio) **antes** de tocar el código.
+
+**Corolario sobre la forma más fuerte de control:** cuando un arreglo tiene que cambiar una
+conducta y **preservar** otra, los tests de la conducta preservada deben pasar en **las dos**
+versiones, y sólo los que afirman el arreglo deben fallar contra la vieja. Eso prueba que el
+cambio tocó lo que quería **y nada más** — es más fuerte que «todo verde después».
+
 ## La cadena no se puede truncar por adelante
 
 **Un prefijo que encadena entero es una historia real que termina antes de tiempo. Un eslabón roto
