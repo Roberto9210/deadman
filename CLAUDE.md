@@ -120,6 +120,46 @@ un proxy; el chequeo que la reemplaza (`scripts/check_line_endings.py`) mide la 
 **La prueba para aplicarla:** describir el daño en una frase que empiece con un verbo. Si el
 chequeo no puede fallar exactamente cuando esa frase es cierta, está midiendo otra cosa.
 
+**Y por qué un proxy sobrevive años, que es la parte sin la cual la regla suena obvia y no lo es:**
+
+> **Es la PROPIEDAD la que duele, así que nadie revisa el PROXY hasta que el daño ocurre igual.**
+
+Mientras el daño no pasa, el proxy no da señal de estar mal — se ve exactamente como un proxy que
+funciona. Y cuando el daño pasa, la atención va al daño, no al proxy que no lo evitó. Por eso no se
+descubren solos: hay que ir a medirlos **sin motivo**, que es justo lo que nadie hace.
+
+## Un arreglo que depende del lector no es un arreglo
+
+Un aviso, una salvedad, un comentario honesto: todo eso protege sólo a quien lo lee, y el daño
+ocurre en quien no lo leyó. **Si la protección requiere que alguien lea algo, no es protección: es
+documentación.**
+
+El mismo día (2026-09-01) la lección llegó por tres caminos, en tres dominios, sin que ninguna
+ventana supiera de las otras:
+
+| dónde | la forma que tomó |
+|---|---|
+| **acá** (`deadman`) | un proxy en `.gitattributes` que se creyó hasta que dolió |
+| **ALAYA** | una salvedad sobre 13 afirmaciones, que dependía de que alguien la leyera |
+| **`deadman-guardian`** | un comentario honesto en el código mientras el dato emitido miente |
+
+**Qué licencia esa convergencia, y qué no** — porque aceptarla sin más sería exactamente lo que
+§5.11 de `docs/ledger-extension-rule.md` existe para impedir, y aceptarla *porque halaga* es la
+señal de la conveniencia:
+
+- **Los DOMINIOS sí son independientes**: tres repositorios, tres artefactos, ninguna derivación
+  común entre ellos. Eso es evidencia fuerte de que el patrón es **frecuente**, y es lo contrario
+  del caso de §5.11, donde la coincidencia venía de un supuesto compartido.
+- **El OBSERVADOR no lo es.** Las tres ventanas son el mismo modelo, con el mismo método cargado de
+  la misma memoria. Son tres *sesiones* distintas, no tres *instrumentos* distintos. Así que la
+  convergencia es evidencia **débil** de que el patrón sea real y no un artefacto de cómo este
+  observador mira.
+
+**Las dos cosas a la vez, y la segunda no anula la primera.** Lo que queda en pie: el patrón
+aparece en dominios que no se hablan, lo cual vale. Lo que no queda probado: que un observador
+distinto lo hubiera visto. Un tercer camino independiente **de observador** — alguien que no sea
+esta casa encontrando la misma forma — es lo que cerraría eso, y no lo tenemos.
+
 ## Método, en corto
 
 - **Verificar contra el código real antes de afirmar.** Un hallazgo no verificado no es un hecho, y
