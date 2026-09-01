@@ -321,6 +321,33 @@ Así que el `?? ""` **ya está produciendo certificados que fallan** — la corr
 > menos acá. La solté exactamente una vez, en la afirmación que era más conveniente: la que
 > convertía un hallazgo de estilo en una urgencia y me daba un paso 0. **Una medición mía más una
 > afirmación ajena no es una confirmación** (§5.9).
+
+#### Qué pasó realmente con ese `?? ""` — SÍNTESIS, no medición
+
+**Procedencia, pegada como manda §5.9:** lo que sigue es **síntesis del operador sobre dos
+reportes de Ventana A**. No es medición nuestra, no es medición suya, y **está pendiente de
+confirmación** por Ventana A. Hasta que llegue, no se construye encima.
+
+Según esa síntesis, las dos cosas son ciertas a la vez:
+
+- Ventana A enumeró **siete** sitios `?? ""` e incluyó `session.timezone` entre ellos;
+- y midió después que `sessionResetTimeZone` es `RequiredKey`, así que el config no parsea sin él
+  y **esa rama nunca se toma**.
+
+O sea: **el `?? ""` existe en el código y su caso es inalcanzable.**
+
+Eso lo convierte en un hallazgo chico y de otra naturaleza:
+
+> **Un `?? ""` que guarda un caso imposible es código defensivo que le hace creer al lector que el
+> caso PUEDE ocurrir. No es una falla: es una pista falsa.**
+
+Y es la pista falsa que nos costó el paso 0 a los dos lados. No hay nada roto que arreglar ahí;
+hay una afirmación implícita en el código que contradice a la configuración, y el arreglo honesto
+es borrar el `??` —no cambiar el `""` por `null`— porque el valor por defecto no puede darse.
+
+*(Nota menor pendiente de la misma confirmación: **seis** o **siete** sitios. El pedido original
+decía seis; la enumeración de Ventana A dice siete. Es exactamente el tipo de detalle que el ítem
+1b del aviso existe para cerrar.)*
 Pero `dayKey` vive en el mismo objeto `session`, y ahí omitir desarma una protección. **El mismo
 patrón de arreglo, aplicado a dos campos vecinos, da un resultado correcto y un desastre.**
 

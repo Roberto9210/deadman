@@ -108,10 +108,22 @@ or null, never a filler string) covers this too.
 simply is not being triggered by that emitter today. `?? ""` goes back to being what it was before
 we overstated it: an honesty defect, worth fixing on its own terms, not an outage.
 
-**And one thing is now open rather than answered:** we were told `session.timezone` is one of the
-six `?? ""` sites, and your measurement says it cannot go empty. Either it is not one of the six,
-or it is one and is unreachable. We are not guessing which — that is ask 1 below, and it is now
-the only thing that resolves this.
+**And one thing changed shape rather than closing.** We are told — as a **synthesis of two
+reports, not as a measurement, and pending your confirmation** — that both are true at once: the
+`?? ""` on `session.timezone` **exists in the code**, and its case is **unreachable**, because
+`sessionResetTimeZone` is a `RequiredKey` and the config does not parse without it.
+
+If that holds, the finding is small and of a different kind than we thought:
+
+> **A `?? ""` guarding an impossible case is defensive code that tells the reader the case can
+> happen. It is not a fault; it is a false lead.**
+
+It is the false lead that cost both sides a phantom priority-zero. And the honest fix is not `""`
+→ `null`: it is **deleting the `??`**, because the default cannot occur. A fallback that can never
+fire is an assertion about the world that the configuration already contradicts.
+
+One detail still open, and ask 1 below is what closes it: we were told **six** `?? ""` sites; the
+enumeration we were shown lists **seven**.
 
 Note also that `null` is not a loophole we are tolerating: `_promise_violations` exempts it
 explicitly (`verify_certificate.py:211`). A declared `null` is a first-class way to say "I do not
@@ -150,7 +162,7 @@ across all six sites, a certificate can lose the protection without anybody choo
 
 1. **Tell us which six sites they are.** We can see one (`session.timezone`) and are guessing at
    the rest. We want to check each against what the verifier does with it, before you change them.
-2. **For each: omit or `null`, never `""`.** Both are clean.
+2. **For each: omit or `null`, never `""`.** Both are clean. And where the fallback's case is unreachable, **delete the `??`** rather than changing its value.
 3. **`session.dayKey` is not in that set.** If it is currently one of the six, it needs a real
    value, not an omission and not a null — it is the anchor the range is judged against.
 
