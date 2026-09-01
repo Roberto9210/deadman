@@ -106,11 +106,19 @@ file:
 | with `session.dayKey` set to `null` | **exit 0** |
 | with the whole `session` block omitted | **exit 0** |
 
-The whole day-coverage check lives inside `if day is not None:`. **No `dayKey`, no check — and
-today we do not even say the check was skipped.** That is our defect and we are fixing it; the
-reason it is in your document is the timing: if the `?? ""` cleanup ships before our fix, and the
-pattern is applied uniformly across all six sites, a certificate can lose the protection without
-anybody choosing to remove it.
+The whole day-coverage check lives inside `if day is not None:`. No `dayKey`, no check.
+
+**To be precise, because we overstated this in an earlier note:** it is not total silence, it is a
+**downgrade**. Without `dayKey` the verifier still reports `POST_RANGE_MATERIAL_EVENTS` and still
+names the three material events — but as `cannot_verify` at exit 0 rather than a contradiction at
+exit 1. What is never said is that the day-coverage check did not run, and the replacement message
+explains the gap with the wrong cause: it reads *"with no DAY_CLOSED for this session"* when there
+**is** a `DAY_CLOSED` — what is missing is which session it belongs to.
+
+That is our defect and we are fixing it, severity following the harm: material events outside the
+range will be a contradiction whether or not `dayKey` is present. The reason it is in your document
+is the timing: if the `?? ""` cleanup ships before our fix, and the pattern is applied uniformly
+across all six sites, a certificate can lose the protection without anybody choosing to remove it.
 
 ### The ask
 
@@ -126,7 +134,7 @@ The rule we are adopting on our side, which is what separates the two cases:
 
 `timezone` carries a value: omitting it loses a datum. `dayKey` carries the scope the document is
 judged against: omitting it switches the judgement off. They are neighbours in the same object and
-the same fix produces the right answer on one and a silent hole on the other.
+the same fix produces the right answer on one and a downgraded verdict on the other.
 
 ---
 
@@ -300,6 +308,11 @@ case-insensitive, so a **state literal** spelled `"UNKNOWN"` or `"NONE"` would b
 `TODO`, `TBD` and `XXX` are filler that gets written in capitals, and a case-sensitive match would
 let all three through — so the protection has to come from proving non-collision instead. We cannot
 prove it against a vocabulary we cannot read.
+
+The rule we settled on, which is why we are asking you for a list rather than changing our matcher:
+
+> **A filler list is tested against the REAL vocabulary, and its requirement is DEMONSTRATED
+> NON-COLLISION — not a rule about the shape of strings.**
 
 **If either list contains a bare `UNKNOWN` or `NONE` as a value, tell us and we will treat it as a
 live defect on our side, not on yours.**

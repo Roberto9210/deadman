@@ -10,8 +10,8 @@
 (mitad aditiva y mitad sustractiva)
 **Estado:** los defectos son hallazgos medidos, no propuestas. **Todo lo marcado RULING está
 DECIDIDO por el operador** — la salida de DEF-1, la de DEF-2, §5.3, §5.4, §5.6, §5.7 y el orden de
-trabajo (§8), el 2026-08-31. La única excepción es §5.8, marcada RULING PROPUESTO: es la mitad
-sustractiva, llegó después y todavía no está ratificada. Nada está implementado, en ningún lado.
+trabajo (§8), el 2026-08-31; §5.8, la mitad sustractiva, con su corolario, el 2026-09-01. Nada
+está implementado, en ningún lado.
 
 Sale de cuatro pedidos del lado del guardián. Tres son ADITIVOS — un evento nuevo (acuse de
 recibo), el `buildHash` en `GUARDIAN_STARTED`, el `dayKey` en `CONFIG_LOADED` — y el cuarto va en
@@ -371,22 +371,52 @@ evento `CONFIG_HASH` —y `CONFIG_LOADED` ya lleva un `configHash` en su payload
 certificado que lo cuente entre sus razones falle acusando al trader de un campo decorativo que
 nunca escribió.**
 
-### La salida
+### La clase, nombrada
 
-El chequeo de promesas debe aplicarse a **nombres de campo del esquema**, nunca a claves derivadas
-de datos. Dos formas, y la diferencia es chica:
+**Derivar un nombre de campo del último segmento de un path y aplicarlo a claves que son nombres de
+evento es una regla cierta sobre un conjunto, aplicada a otro.** La ausencia de colisiones hoy
+prueba suerte, no diseño. Tiene que volverse estructural.
 
-1. **No descender con nombre** en los contenedores de claves libres (`reasons`, `byType`): sus
-   claves son datos, no esquema.
-2. **Invertir**: aplicar las promesas sólo a un conjunto conocido de nombres de campo.
+### La salida, prototipada y medida
 
-Recomiendo (1): es más chica, y (2) convierte la regla 5 en una lista que hay que mantener al día,
-que es justo lo que se evitó cuando se escribió como pregunta genérica.
+Descarté una de las tres candidatas **con un test que ya existe**, no por opinión:
 
-**Y la prueba que la cierra de verdad**, que es la lección de §5.7 hecha mecánica: un test que
-barre **el vocabulario entero de eventos** a través de la regla 5 y exige cero hallazgos. Lo que
-hice a mano una vez, corriendo en CI para siempre. Necesita el vocabulario completo del guardián —
-ítem 6 del aviso.
+- **Chequear sólo valores de tipo cadena** (así una cuenta entera nunca se acusa). **Descartada:**
+  `tests/test_c_rule_five.py:68-76` fija a propósito que `personalDailyLossLimit = 600` —un
+  entero— dispare `FIELD_BELIES_ITS_NAME`, con su motivo escrito: *«a float here is a rounding bug
+  waiting for a bad day»*. Esta salida rompería esa protección.
+- **Declarar los contenedores de claves libres** (`reasons`, `byType`) y no usar sus claves como
+  nombres. Correcta, pero su modo de falla es el malo: el día que aparezca un contenedor nuevo y
+  alguien olvide declararlo, **vuelve la acusación falsa.**
+- **INVERTIR: las promesas se aplican sólo a nombres que el ESQUEMA DEL CERTIFICADO posee.**
+  Un nombre que no está en el conjunto no se acusa.
+
+**La inversión es la que va**, y el argumento decisivo es el modo de falla. Si alguien agrega un
+campo de esquema con promesa y olvida declararlo, el chequeo **calla**. Si alguien agrega un
+contenedor de datos y olvida declararlo, el chequeo **acusa**. El propio archivo ya eligió esa
+dirección, por escrito, en `:198-200`: *«the cost of a false accusation here is a certificate
+wrongly refused, so the checks err toward silence.»* Hoy la regla 5 viola su propia calibración; la
+inversión la restituye.
+
+Y contesta la objeción que yo misma había puesto —«convierte la regla 5 en una lista que hay que
+mantener»—: sí es una lista, pero es **nuestra y cerrada** (los nombres del esquema del
+certificado), no la del guardián (abierta, creciente y ajena), y **omitir de ella produce silencio,
+no una acusación.**
+
+**Prototipada y corrida contra la suite real** (parche en el scratchpad, nada aplicado al repo):
+
+| | resultado |
+|---|---|
+| `tests/test_c_rule_five.py` | **12/12 pasan** (baseline sin parche: 12/12) |
+| suite entera del certificado (4 archivos) | **88/88 pasan** |
+| `reasons` con `CONFIG_HASH`, `SEAL_HASH`, `DAILY_LOSS`, `SOFT_LIMIT`, `EXPIRES_AT_UTC` | de `FIELD_BELIES_ITS_NAME` a **limpio**, los cinco |
+| `buildHash: "example"` / `"latest"`, `sealHash: "abc123"`, `armedAtUtc: "this morning"`, `personalDailyLossLimit: 600`, `version: "1.0.0.0"` | **se siguen atrapando**, los seis |
+
+**Y la prueba que la cierra de verdad**, que es §5.7 obligación 2 hecha mecánica: un test que barre
+**el vocabulario entero de eventos** a través de la regla 5 y exige cero hallazgos. Lo que hice a
+mano una vez, corriendo en CI para siempre. Necesita el vocabulario completo del guardián — ítem 6
+del aviso. Con la inversión aplicada ese test pasa por construcción, y sigue valiendo: es lo que
+detecta el día en que alguien agregue un nombre de esquema que colisione.
 
 ---
 
@@ -630,6 +660,16 @@ sobre la unidad que tiene significado.
    no fragmento. Construcción, no palabra.
 2. **Se prueba contra el vocabulario legítimo**, enumerado, con un test que barre todo el conjunto
    y exige cero hallazgos. No basta con revisar los casos que se le ocurrieron a alguien.
+
+   > **Una lista de relleno se prueba contra el VOCABULARIO REAL, y su requisito es NO-COLISIÓN
+   > DEMOSTRADA, no una regla sobre la forma de las cadenas.**
+
+   Esto se decidió después de descartar una regla sobre la forma. La propuesta era exigir
+   comparación **sensible a mayúsculas**, razonando desde `ACCOUNT_UNKNOWN`. Se retiró porque la
+   generalización es peor que el ejemplo: **`TODO`, `TBD` y `XXX` son relleno que en la vida real
+   se escribe en mayúsculas**, y una comparación sensible los deja pasar a los tres. La
+   normalización se queda; lo que hace falta es la prueba de no-colisión, que es esta misma regla
+   un piso más arriba aplicada a sí misma.
 3. **La normalización se justifica o no se hace.** `.lower()` en `DECORATIVE_FILLER` está bien
    —`TODO`/`TBD`/`XXX` son relleno en mayúsculas— pero está bien *porque se puede argumentar*, y
    el argumento va escrito al lado. Una normalización sin motivo escrito es superficie de colisión
@@ -659,9 +699,7 @@ Medido, quitando cada clave conocida del certificado de ejemplo:
 > `CERTHASH_MISMATCH`, que es lo correcto. Lo dejo escrito porque el instrumento tapó el resultado
 > y ésa es la falla que importa, no la fila.)*
 
-### — RULING PROPUESTO — cómo se clasifica una clave ausente
-
-*(Es el único de este documento que no viene ratificado; lo traigo con la clasificación hecha.)*
+### — RULING — cómo se clasifica una clave ausente
 
 > **Una clave conocida que falta se clasifica por lo que su ausencia APAGA, no por lo que deja de
 > decir.**
@@ -680,6 +718,43 @@ Medido, quitando cada clave conocida del certificado de ejemplo:
 
 **Nunca contradicción por ausencia sola.** Una clave ausente no es una afirmación falsa. Acusar a
 un documento honesto de incompleto es el error que §5.3 llama catastrófico, y aplica igual acá.
+
+### — COROLARIO RATIFICADO — un campo de ALCANCE ausente nunca es un salto silencioso
+
+> **Para un campo de alcance, la ausencia no puede ser un salto silencioso. O es fallo duro, o el
+> verificador declara explícitamente que ese chequeo NO CORRIÓ. Las dos son defendibles; el
+> silencio no.**
+
+**Antes de elegir, una corrección a mi propio reporte.** Dije que al sacar `dayKey` «nadie se
+entera». Medido con el informe completo delante, es más preciso y más feo que eso: **no es
+silencio, es un DOWNGRADE, y el mensaje que queda atribuye mal la causa.**
+
+| el certificado truncado | qué dice el verificador |
+|---|---|
+| con `dayKey` | **contradicción** `RANGE_TRUNCATED`, exit 1 — nombra los 3 eventos materiales escondidos |
+| sin `dayKey` | **`cannot_verify`** `POST_RANGE_MATERIAL_EVENTS`, exit 0 — nombra los mismos 3 eventos |
+
+Así que algo sí se dice. Lo que **no** se dice es que el chequeo de cobertura no corrió. Y el
+mensaje de reemplazo lo explica con la causa equivocada: dice *«with no DAY_CLOSED for this
+session»* cuando **sí hay un `DAY_CLOSED`** — lo que falta es que le digan a qué sesión pertenece.
+Es DEF-2 otra vez, un piso más abajo: **un mensaje que afirma más de lo que su código comprobó.**
+
+**La salida que propongo no es ninguna de las dos puras, sino el principio que el propio código ya
+declara** en `:642-644` — *«Severity follows the harm, not the shape»*:
+
+1. **Decir que el chequeo no corrió.** `cannot_verify` con código propio (`SCOPE_MISSING`) y el
+   motivo correcto: «el certificado no nombra un día, así que la cobertura de la sesión no se
+   verificó» — no «no hay DAY_CLOSED».
+2. **Y que la severidad no dependa de si `dayKey` está.** Si hay eventos materiales fuera del rango
+   declarado, el daño es idéntico con `dayKey` y sin él, así que **es contradicción en los dos
+   casos.** Eso cierra el downgrade: el truncado sin `dayKey` vuelve a exit 1, por la razón que
+   corresponde.
+
+Por qué no el fallo duro puro: acusaría a un certificado honesto que simplemente no nombra un día,
+sin que nada material esté escondido — el error que §5.3 llama catastrófico. Por qué no el
+«declarar» puro: deja el truncado en exit 0, y un consumidor automático que sólo lee el código de
+salida ve «bien». **La severidad atada al daño da las dos cosas bien**, y no inventa un criterio
+nuevo: es el que ya está escrito ocho líneas más arriba en el mismo archivo.
 
 ### La frontera que esto le agrega al ruling de §5.6
 
@@ -769,6 +844,30 @@ Los ejemplos (`certificate.json`, `ledger.jsonl`) se **copiaron** al scratchpad 
 trabajaron ahí; no se escribió nada dentro de `deadman/` salvo este documento. Cada caso se
 construyó mutando el ejemplo, re-encadenando honestamente con las reglas reales de hash, y
 corriendo `verify_certificate` / `Ledger.verify` sobre el resultado. Todos los pares tienen control.
+
+### La clase que apareció dos veces: mi herramienta contestó por el sujeto
+
+Las dos veces que me equivoqué en esta tanda fueron **la misma falla**, y merece nombre propio
+porque no es la del doble de prueba:
+
+> **En el doble de prueba, el MODELO DEL MUNDO simplifica. Acá el APARATO DE MEDICIÓN produce la
+> respuesta en lugar del sistema.** «Mi herramienta contestó por el sujeto.»
+
+- El `print` de la sonda de anclas llevaba la conclusión escrita **antes** de correr: informaba
+  `ANCHOR_MISMATCH` porque yo lo había tipeado, no porque el ancla hubiera cambiado.
+- El helper `reseal()` reponía `certHash` **después** de que yo lo borrara, así que la fila
+  «`certHash` ausente» medía un certificado con `certHash`.
+
+**Lo que las hace peligrosas es que las dos se veían como un resultado cómodo, no como un error.**
+Una confirmaba lo que yo esperaba; la otra daba exit 0 en una fila donde exit 0 era plausible.
+Ninguna se presenta como fallo: se presentan como respuesta.
+
+La defensa que funcionó las dos veces fue la misma y no es sofisticada: **un control que tiene que
+fallar.** Cuando el par control/caso da lo mismo, el instrumento está contestando. Y por eso las
+dos quedan escritas acá en vez de corregidas en silencio — el modo de falla vale más que las dos
+filas que arregló.
+
+### Chequeos sobre mí misma
 
 Cuatro cosas que fueron chequeos sobre mí misma más que sobre el código:
 
