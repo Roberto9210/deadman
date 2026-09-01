@@ -381,6 +381,48 @@ Los dos papeles coherentes, para la especificación de §6:
 **Lo que no es defendible es el estado de hoy**, que toma prestado de las dos: se comporta como
 pista y se publica como afirmación.
 
+### POR QUÉ ESTE SUBE EN LA COLA: hay un tercero mandando lectores a esa línea
+
+Leído en fuente primaria (`deadman-guardian`, commit **`e42b948`**, sólo lectura). El emisor
+**escribe el puntero a nuestra herramienta dentro del propio certificado**:
+
+```csharp
+// src/GuardianCore/Certificate.cs:543-545
+.Set("tool", "deadman-kit")
+.Set("install", "pip install deadman-kit")
+.Set("command", "python -m deadman.verify_certificate certificate.json ledger.jsonl")
+```
+
+y también en la interfaz del AddOn (`nt/addon/DeadmanGuardianAddOn.cs:969`). No es sólo el HTML:
+**`verifyInstructions` es un campo del documento que viaja con él** — y nuestro verificador ni
+siquiera lo lee, es puramente para el lector humano.
+
+**La asimetría que lo vuelve peor de nuestro lado que del suyo** (planteada por el operador,
+1-sep):
+
+> La tabla del emisor es **la palabra del emisor sobre sí mismo**, y un lector puede descontarla.
+> La línea `VALID` es **la segunda opinión independiente**, y un campo impreso adentro se lee como
+> que **sobrevivió a la verificación**. Misma clase de defecto, autoridad más alta.
+
+Y hay una vuelta más, que es la que ordena el ítem:
+
+> **El descargo del emisor FABRICA la autoridad que nuestra línea después usa mal.** El certificado
+> dice, en su propio cuerpo, «no me creas: instalá esto y corrélo». Eso es el emisor **cediendo**
+> autoridad. Cuanto más honesto es el emisor al mandar al lector a verificar, **más peso cae sobre
+> la única línea que carga un campo que nadie comprobó.**
+
+Es la peor combinación posible: la humildad de un lado creando la credibilidad que el defecto del
+otro lado gasta.
+
+**Reordenado por el criterio ya ratificado** (§8: *cuántos tienen que hacer algo mal*): **cero.**
+Nadie tiene que equivocarse — un lector que sigue las instrucciones **impresas en el documento que
+recibió** llega a una línea que nombra una clave no verificada. Deja de ser un camino hipotético:
+está publicitado en la evidencia. Por eso 6b pasa del sexto puesto al segundo, detrás sólo de
+DEF-3, que sigue primero por la excepción de rechazar trabajo honesto.
+
+*(No es un pedido de arreglo inmediato del otro lado y no lo tratamos como tal: 6b es nuestro y no
+necesita nada de ellos.)*
+
 ### El arreglo mínimo — APROBADO, y la decisión sobre qué poner en su lugar
 
 **Se saca `keyId` de la cadena `VALID`.** No elige papel, así que puede ir antes de la
@@ -1242,21 +1284,24 @@ regla de extensión (§5) y los papeles de `keyId` (DEF-5).
    **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros tres defectos
    dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el verificador.
    *(El paso 0 que había acá —`session.timezone`— se retiró: ver la retractación en §DEF-4.)*
-2. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
+2. **DEF-5, arreglo mínimo (6b)** — sacar `keyId` de la línea `VALID`, en el render y en `--json`,
+   sin reemplazo. **Sube del sexto puesto al segundo** (1-sep): el emisor imprime el puntero a
+   nuestra herramienta **dentro del certificado** (`Certificate.cs:543-545`), así que hay un
+   tercero mandando lectores a esa línea exacta. Por el criterio de §8 es tier **cero** — nadie
+   tiene que equivocarse. Es un cambio de una línea y no necesita la especificación.
+3. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
    limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
    comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
-3. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
+4. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
    `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
    limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
-4. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
+5. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
    inyección top-level como control.
-5. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
-6. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
-6b. **DEF-5, arreglo mínimo (APROBADO)** — sacar `keyId` de la línea `VALID`, en el render y en
-   `--json`. **Sin reemplazo** (decisión medida, ver DEF-5). No define el papel del campo, sólo
-   deja de afirmar lo no medido; por eso puede ir antes que la especificación. El papel espera §6.
-7. Escribir §5 donde se decida en §6.
-8. Recién entonces, el evento de acuse.
+6. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
+7. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
+8. El papel de `keyId` en sí — espera §6. El arreglo mínimo ya salió en el paso 2.
+9. Escribir §5 donde se decida en §6.
+10. Recién entonces, el evento de acuse.
 
 ### — RULING — el criterio de orden
 
