@@ -449,7 +449,16 @@ Medido sobre 144 nombres generados adversarialmente:
 
 Los 44 son nombres como `UNKNOWN`, `NONE`, `TBD`, `CHANGEME`, `BAR`, `1.0.0.0`. Ninguno existe hoy;
 todos son nombres que alguien puede elegir mañana. **Sin el aporte del otro lado habría entregado
-medio arreglo con un test que pasaba.**
+medio arreglo con un test que pasaba** — y pasaba por el motivo equivocado, que es verificación
+cómplice otra vez.
+
+**Y lo que la hizo visible fue el generador, no el ojo.** Los 144 nombres son **generados
+adversarialmente** —cada sufijo al que reaccionan las promesas cruzado con cada palabra de la lista
+de relleno cruzado con los prefijos que un vocabulario real produce—, no cosechados del vocabulario
+que existe. **Un barrido sobre los 37 nombres reales habría dado verde**, y el verde habría
+certificado el arreglo a medias. Cosechar el conjunto real y barrerlo es exactamente el instrumento
+contestando por el sujeto, un piso más arriba: el conjunto de hoy no falla porque nadie eligió
+todavía un nombre que falle.
 
 ### — RULING — la regla 5 se aplica según la PROCEDENCIA del campo
 
@@ -469,9 +478,17 @@ del pasamanos:
 | **una persona la aporta** | `subject.alias` | **relleno NO.** Su alias es su nombre. Que el producto le diga a un usuario que su nombre es inválido sería absurdo, y el riesgo de excluirlo es nulo: el chequeo sólo rechaza, no se lo puede engañar para que apruebe |
 | **se copia de la evidencia** | `triggerEvent`/`precedingEvent`, claves de `reasons` y de `byType` | **relleno NO — se COMPARA contra el ledger**, que es estrictamente más fuerte. Juzgar su forma es juzgar el vocabulario ajeno; compararlo prueba que el certificado dice lo que la evidencia dice |
 
-La tercera fila es la que cierra los 44, y encaja con el ruling de DEF-2 parte 2: `precedingEvent`
-**se compara**. Un campo que se verifica por comparación no necesita —y no debe— verificarse por
-forma.
+La tercera fila es la que cierra los 44, y el principio que hay debajo vale más que el caso:
+
+> **COMPARACIÓN Y FORMA SON VERIFICACIONES ALTERNATIVAS, NO COMPLEMENTARIAS.**
+>
+> Si un campo se puede comparar contra su fuente, **se compara** — y entonces chequearle la forma
+> sólo puede producir falsos positivos, porque su forma **la decide otro**. Si no se puede
+> comparar, ahí sí la forma es lo único que queda.
+
+Encaja con el ruling de DEF-2 parte 2 sin forzarlo: `precedingEvent` deja de juzgarse por forma
+**justamente porque empieza a compararse**. Los dos cambios son el mismo cambio visto de los dos
+lados — no dos arreglos que hay que acordarse de aplicar juntos.
 
 ### La prueba: una PROPIEDAD, no un conjunto
 
@@ -942,11 +959,28 @@ porque hoy cita cuatro secciones de un documento que no tiene.
 7. Escribir §5 donde se decida en §6.
 8. Recién entonces, el evento de acuse.
 
-**El criterio de orden, ahora que son cuatro y llegó el dato de LT-2:** primero lo que ya está
-roto en operación normal, sin adversario; después lo que emite falsedades; al final lo que abre un
-agujero que alguien tendría que ir a usar. DEF-2 sigue por delante de DEF-1 por ese motivo, y
-`timezone` y DEF-3 se les adelantan a los dos porque no requieren siquiera que alguien mienta:
-**fallan solos, sobre contenido honesto.**
+### — RULING — el criterio de orden
+
+> **EL ORDEN VA POR CUÁNTA GENTE TIENE QUE HACER ALGO MAL PARA QUE EL DEFECTO DUELA.**
+
+| cuántos | qué significa | quién cae acá |
+|---|---|---|
+| **cero** | se dispara solo, en operación normal | `session.timezone: ""` (ruta LT-2) |
+| **uno** | el productor se equivoca y el documento sale falso | DEF-2, DEF-4 |
+| **dos** | alguien tiene que ir a usar el agujero | DEF-1 |
+
+**Y DEF-3 se adelanta a todo por un motivo distinto y más caro: es el único que RECHAZA
+CERTIFICADOS HONESTOS.**
+
+Un defecto que castiga el uso correcto no sólo falla — **entrena a la gente a esquivar la
+protección.** Es la regla de §5.7 del otro lado del espejo: un freno cuyo arreglo habitual es
+«desactivalo» ya dejó de ser un freno, y **un verificador que rechaza documentos honestos se gana
+ese arreglo solo.** No hace falta que nadie decida ignorarlo; basta con que falle sobre trabajo
+legítimo las veces suficientes.
+
+Por eso el eje no es «gravedad» sino **cuánta acción humana equivocada hace falta**, con esa
+excepción arriba de todo: los defectos que dañan sin que nadie se equivoque, y el que daña
+justamente a quien no se equivocó.
 
 > **Un documento que ya está equivocado es peor que un agujero que nadie abrió.**
 
