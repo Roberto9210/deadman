@@ -1554,7 +1554,7 @@ corregir los blobs, o corregir la frase.
 
 ## 8. — RULING — Orden de trabajo
 
-1. **DEF-3, las dos mitades** — la inversión **y** la procedencia. **Arranca acá**, que es donde
+1. ~~**DEF-3, las dos mitades**~~ — **HECHO (2026-09-01, )**: la inversión **y** la procedencia, con el barrido escrito como propiedad (144 nombres generados) y el backup como control: con el código viejo y los tests nuevos fallan exactamente los dos que afirman el arreglo. Suite 317. Arrancaba acá, que es donde
    su propio argumento ya lo ponía antes de que yo inventara un paso 0: es lo único que hoy hace
    **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros tres defectos
    dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el verificador.
