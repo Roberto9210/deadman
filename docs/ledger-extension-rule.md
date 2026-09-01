@@ -1269,6 +1269,109 @@ incompatibles entre sí, y ninguna reconocible como el error.**
 Por eso §6 deja de ser una observación y pasa a ser un requisito con dos casos que lo esperan: la
 regla de extensión (§5) y los papeles de `keyId` (DEF-5).
 
+### 6.1 Los supuestos compartidos, ordenados por CONSECUENCIA y no por dependencia
+
+El descuento de §5.11 («consistente», no «corroborado») es **uniforme**. El riesgo **no**. La
+pregunta *¿hay un tercero que dependa de este acuerdo hoy?* es **necesaria y no suficiente**: hay
+que cruzarla con *¿un desvío entre los dos lados sería RUIDOSO o SILENCIOSO?* **Un desvío ruidoso
+se vigila solo** — no puede esconderse, así que no necesita §6 para protegerlo.
+
+| supuesto compartido | ¿tercero hoy? | un desvío sería… | riesgo |
+|---|---|---|---|
+| **qué cuenta como EPISODIO** | sí, el lector del certificado | **SILENCIOSO** — medido: emisor y verificador con la misma regla dan exit 0, cero hallazgos | **el más alto** |
+| cuerpo hasheado de la entrada | sí, quien verifica la cadena | ruidoso entre dialectos (`CHAIN_BROKEN`); **silencioso para una EXCLUSIÓN compartida dentro de uno** — que es DEF-1 | medio, y ya atendido |
+| preimage de `certHash` | sí | **RUIDOSO** — medido, ver abajo | **bajo** |
+| orden canónico | sí | ruidoso; es *un componente* de los dos de arriba, no un cuarto ítem | bajo |
+
+**Desmiento el candidato a encabezar.** La hipótesis era que el preimage de `certHash` iba primero
+porque un supuesto no examinado ahí haría decir `VALID` por la razón equivocada en todos los
+certificados sin que nadie lo viera. **Medido, es al revés: es el más autovigilado de los cuatro.**
+
+| prueba | resultado |
+|---|---|
+| campo top-level desconocido agregado al certificado | **entra** en el preimage; sin recomputar ⇒ `CERTHASH_MISMATCH`, exit 1 |
+| el emisor usando otra canonicalización (separadores distintos) | `CERTHASH_MISMATCH`, exit 1 |
+
+Dos motivos, y el segundo pesa más que el primero:
+
+1. **Un desvío falla en cada corrida, de inmediato y ruidosamente.** Los dos lados no *pueden*
+   compartir en silencio un supuesto equivocado ahí: el acuerdo se re-testea entero cada vez que
+   alguien verifica un certificado. Es el único de los cuatro con una prueba continua encima.
+2. **Sus dos exclusiones —`certHash` y `signature`— no son un supuesto: están FORZADAS por el
+   orden.** La firma se computa sobre el hash, así que no puede estar adentro. Los dos lados lo
+   derivaron de una restricción real, no de haber leído lo mismo. **Eso sí es una derivación
+   independiente**, que es exactamente lo que §5.11 pide y casi nunca hay.
+
+**El que encabeza es «qué cuenta como episodio»**, y por los dos ejes a la vez: el lector del
+certificado depende de él (es el relato de lo que pasó), un supuesto compartido ahí **no produce
+ningún hallazgo** — medido, exit 0 —, y **ya se sabe equivocado**, porque la atribución por
+adyacencia de DEF-2 vive adentro de esa misma computación. No es «consistente a la espera de §6»:
+es el único donde el descuento ya tiene consecuencia viva.
+
+### 6.2 Cómo se escribe §6 sin reproducir el supuesto — pre-registro por campo
+
+Mi propuesta era «decidir cada campo por lo que debe significar y después medir qué implementación
+se aparta». **Tenía el instinto y le faltaba el control**, y el hueco es real: quien escriba §6 ya
+conoce las dos implementaciones y **no puede desconocerlas**. La hoja en blanco no purga el
+supuesto, sólo esconde de dónde vino — §6 podría reproducirlo palabra por palabra y **el resultado
+se vería igual que un éxito**.
+
+Lo que sí se puede conseguir no es ignorancia: es **una pregunta generadora distinta** (operador,
+1-sep).
+
+> Las dos implementaciones se escribieron contestando **«cómo computo este campo»**.
+> §6 tiene que contestar otra: **«qué queda habilitado a concluir un lector de este campo, y qué
+> tiene que ser verdad para que esa conclusión se sostenga»**.
+
+Se deriva del lado del **CONSUMIDOR**, no del productor — y es un eje donde las dos
+implementaciones **están mudas**: ninguna codifica en ningún lado a qué tiene derecho el lector.
+
+**El mecanismo, que es maquinaria que esta casa ya usa: pre-registro, campo por campo.** Se escribe
+a qué tiene derecho el lector, **se sella**, recién después se abren las dos implementaciones, y se
+anota el desvío. Sin el sello previo, **la convergencia inconsciente no se puede distinguir del
+acuerdo genuino.** Campo por campo, no documento por documento.
+
+**Y trae su propio control, que es lo que a mi versión le faltaba:**
+
+> **SI §6 ESCRITA ASÍ REPRODUCE LAS DOS IMPLEMENTACIONES EXACTAMENTE, CAMPO POR CAMPO, SIN NINGÚN
+> DESVÍO, ESO NO ES ÉXITO: ES LA SEÑAL DE QUE SE ESCRIBIÓ MIRANDO EL CÓDIGO.**
+
+**Cero desvíos es la alarma, no la meta.** Es la regla de la casa —toda medición incluye un control
+que DEBE dar distinto— aplicada a la escritura de una especificación: **el control es el propio
+conteo de desvíos.** Y cada desvío se trata como hallazgo, nunca como error de transcripción: es la
+única evidencia de que la pregunta generadora fue de verdad distinta.
+
+### 6.3 El modelo ya probado en casa: los dialectos nombrados
+
+**Confirmado, medido literalmente.** El ledger tiene **dos dialectos NOMBRADOS** con reglas de hash
+distintas:
+
+| | cuerpo hasheado | genesis | ¿entra un campo top-level nuevo? |
+|---|---|---|---|
+| `guardian-core-v1` | **todo menos `hash`** | `"genesis"` | **sí** |
+| `deadman-kit-v1` | **siete campos nombrados** | 64 ceros | **no** |
+
+Y la lectura del operador es correcta y es el punto:
+
+> **No es que los dos lados se pusieran de acuerdo: es que dejaron de fingir que había una sola
+> regla.** Donde la casa se tomó el trabajo de NOMBRAR las dos reglas, la diferencia quedó
+> **visible** en vez de coincidente.
+
+**Pero el mecanismo tiene tres partes, no una, y §6 necesita las tres:**
+
+1. **Nombrar** las reglas. Solo eso dejaría al lector adivinando cuál aplica.
+2. **DECLARAR** cuál aplica: el certificado lleva `ledgerDialect`, y el comentario del archivo dice
+   por qué no se olfatea — *«sniffing the shape would let a forger hand over a ledger built in
+   whichever schema suits the lie»* (`:93-96`).
+3. **Hacerla cumplir**: `_check_dialect` falla cerrado en **cada entrada**, no sólo en la primera.
+
+**Y su límite, que hay que decir para no sobreextender el modelo:** los dialectos funcionan porque
+la pluralidad era **legítima** — dos productores, dos esquemas. Para «qué cuenta como episodio» hay
+**una sola** regla, compartida y no examinada; ahí no hay dos dialectos que declarar. **El patrón
+de los dialectos sirve para la pluralidad genuina; el pre-registro de §6.2 sirve para la regla
+única que nadie miró.** §6 necesita los dos, y saber cuál aplica a cada campo es parte de
+escribirla.
+
 ## 7. Estado de los pedidos del emisor
 
 | pedido | ¿rompe algo? | estado |
