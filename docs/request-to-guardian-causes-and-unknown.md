@@ -301,6 +301,23 @@ things is true and both need an answer before that event is touched:
 - the emitter does **not** write `fresh`, in which case the example we publish misrepresents the
   format, and that is a problem of ours to fix regardless of this request.
 
+### ANSWERED by reading the source (commit `66dee69`) — both were true
+
+`GUARDIAN_STARTED` is emitted from **two sites, with two different payloads**:
+
+```csharp
+Guardian.cs:185   Log(Ev.GuardianStarted, Obj().Set("state","DISARMED").Set("fresh", true));
+Guardian.cs:214   Log(Ev.GuardianStarted, Obj().Set("state", _state.Kind...));
+```
+
+So "it carries only `state`" was right about one site and our packaged example was right about the
+other. **Neither description was wrong; the event has two shapes and nobody had said so.**
+
+**What that changes for this request:** `buildHash` must be added at **both** sites, or the two
+shapes diverge further. And it is worth deciding whether `fresh` should be present at `:214` too —
+absent, it is indistinguishable from `fresh: false` to any reader, which is the same
+absence-versus-false problem item 4b settled for `exhausted`.
+
 ---
 
 ## 6. Send us the enumerated vocabulary, so our filters can be tested against it

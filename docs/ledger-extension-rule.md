@@ -1,5 +1,17 @@
 # Cómo se extiende el ledger — cinco defectos vivos, y la regla que va encima
 
+> **POR QUÉ HAY QUE ESCRIBIR LA ESPECIFICACIÓN** (§6) — el argumento entero, en una frase:
+>
+> ### Un documento faltante no produce un hueco visible. Produce dos decisiones locales coherentes, incompatibles entre sí, y ninguna reconocible como el error.
+>
+> Por eso una especificación ausente **no se detecta revisando código**: no hay nada mal escrito de
+> ningún lado. Los dos tratamientos opuestos de `keyId` eran razonables, y ninguno de los dos lados
+> se equivocó. **El error no vive en ninguna de las dos decisiones — vive entre ellas, y sólo se ve
+> cuando alguien las mira juntas.** Ésta es la primera línea del documento de la spec cuando se
+> escriba.
+
+---
+
 > **La pregunta tiene dos mitades y este documento contesta las dos.** La aditiva —¿admite el
 > formato un campo o un evento que no conoce?— es §5.1-§5.6. La **sustractiva** —¿admite que una
 > clave que sí conoce FALTE?— es §5.8, y la respuesta es distinta, porque **un campo desconocido es
@@ -179,6 +191,33 @@ Un chequeo de P&L de rutina que casualmente caiga antes de la desconexión queda
 causa. El acuse de recibo no crea el defecto: lo vuelve vistoso, porque «el guardián se quedó ciego
 porque una persona miró el aviso» es imposible de leer sin notarlo.
 
+### LEÍDO EN LA FUENTE (2026-09-01): el emisor infiere la causa por adyacencia TAMBIÉN
+
+Leído directamente en `deadman-guardian`, commit **`66dee69`** (sólo lectura, nada escrito ahí):
+
+```csharp
+// src/GuardianCore/Certificate.cs:238
+current.TriggerEvent = prevEv;
+```
+
+**El emisor deriva la causa igual que nosotros: tomando el evento anterior.** Después la emite
+(`:464`, sólo si no es nula) y la vuelve a leer (`:685`).
+
+Eso cambia la gravedad de DEF-2, y no en la dirección cómoda:
+
+> **No es «el verificador infiere causalidad». Son DOS implementaciones independientes de la misma
+> regla equivocada, que por eso siempre COINCIDEN — y su coincidencia se lee como corroboración.**
+
+Un emisor y un verificador que derivan el mismo campo con la misma regla errónea nunca se
+contradicen. La comparación que pide el ruling de DEF-2 parte 2 **pasaría siempre**, y pasaría por
+el motivo equivocado: no comprobaría que la causa es cierta, sólo que los dos cometen el mismo
+error. **Es verificación cómplice en su forma más pura: dos partes que se confirman porque
+comparten la premisa, no porque la premisa sea verdadera.**
+
+**Consecuencia para el orden de trabajo:** comparar `precedingEvent` sigue siendo necesario —evita
+que el campo sea texto libre— pero **NO es suficiente y no hay que venderlo como si lo fuera.** Lo
+que hace verdadero al documento es el renombre y la limitación de causas, no la comparación.
+
 ### La segunda capa, que es peor
 
 `triggerEvent` y `triggerSeq` **nunca se comparan contra el ledger.** La comparación de episodios
@@ -321,10 +360,43 @@ Los dos papeles coherentes, para la especificación de §6:
 **Lo que no es defendible es el estado de hoy**, que toma prestado de las dos: se comporta como
 pista y se publica como afirmación.
 
-**Arreglo mínimo mientras la especificación no exista** — y es de los que no requieren decidir nada,
-porque no elige papel: **sacar `keyId` de la cadena `VALID`**, o reemplazarlo por lo que el
-verificador sí comprobó (la ruta o el fingerprint de la clave **suministrada**). Eso no define el
-papel del campo; sólo deja de afirmar lo que no se midió.
+### El arreglo mínimo — APROBADO, y la decisión sobre qué poner en su lugar
+
+**Se saca `keyId` de la cadena `VALID`.** No elige papel, así que puede ir antes de la
+especificación; sólo deja de afirmar lo que no se midió. Aplica también a `--json`, que hoy
+transporta la misma cadena (`:1524`) — y ahí es peor, porque un consumidor automático la parsea
+como dato en vez de leerla como prosa.
+
+**Decisión mía, con la medición que la sostiene: NO se reemplaza por el fingerprint de la clave
+suministrada. Se saca y punto.**
+
+Medido primero, porque era el argumento a favor: **el informe no nombra la clave en ningún otro
+lado** — ni la ruta, ni nada. `signature_status` es la única línea que habla de la firma, en el
+render (`:463`) y en el JSON (`:1524`). Así que un informe reenviado hoy no dice con qué se
+verificó, y el fingerprint llenaría ese hueco.
+
+**Aun así va afuera, por tres motivos en orden de peso:**
+
+1. **Imprimir un fingerprint donde estaba `keyId` invita a la comparación que la especificación
+   todavía no autorizó.** Nadie va a ver esos dos valores sin preguntarse si coinciden — y
+   *responder eso* es exactamente lo que la spec tiene que definir. No prejuzga definiendo `keyId`;
+   prejuzga **creando la pregunta**.
+2. **Elegiría una definición de identidad de clave sin decirlo.** Hay al menos cuatro derivaciones
+   plausibles (clave cruda de 32 bytes, SPKI DER, thumbprint RFC 7638, formato OpenSSH). Publicar
+   una la vuelve la de facto. Es el mismo error que §6 documenta, mudado del comentario de código
+   al formato de salida.
+3. **No tiene lector nombrado hoy** (§5.2 obligación 3). Quien corre el verificador **eligió** la
+   clave: la escribió en `--pubkey`. El lector que ganaría algo es el de un informe reenviado, y el
+   artefacto que se reenvía es el **certificado**, no el informe.
+
+**Y lo que se pierde, dicho sin maquillar:** `signature VALID` a secas significa «la clave que
+aportaste verificó esto». Es menos de lo que parecía y **es exactamente lo que el verificador
+sabe**. Si mañana hace falta que el informe sea autoportante —y puede hacer falta— eso entra por
+la especificación, con el nombre de la derivación adentro, no por una línea de salida.
+
+*(Propuesta retirada, con su motivo, según la norma de la casa: «reemplazar `keyId` por el
+fingerprint de la clave suministrada». Se consideró, se midió el hueco que llenaría, y se descartó
+por los tres motivos de arriba. No hace falta volver a medirlo.)*
 
 **Y los dos papeles van a la especificación, no a un comentario de código.** Definirlos en un
 comentario es exactamente cómo se llegó a que un mismo campo tenga dos tratamientos opuestos a 17
@@ -1128,9 +1200,9 @@ regla de extensión (§5) y los papeles de `keyId` (DEF-5).
    inyección top-level como control.
 5. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
 6. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
-6b. **DEF-5, arreglo mínimo** — sacar `keyId` de la línea `VALID`, o cambiarlo por lo que sí se
-   comprobó. No define el papel del campo, sólo deja de afirmar lo no medido; por eso puede ir
-   antes que la especificación. El papel en sí espera a §6.
+6b. **DEF-5, arreglo mínimo (APROBADO)** — sacar `keyId` de la línea `VALID`, en el render y en
+   `--json`. **Sin reemplazo** (decisión medida, ver DEF-5). No define el papel del campo, sólo
+   deja de afirmar lo no medido; por eso puede ir antes que la especificación. El papel espera §6.
 7. Escribir §5 donde se decida en §6.
 8. Recién entonces, el evento de acuse.
 

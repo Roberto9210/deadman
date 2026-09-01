@@ -40,6 +40,26 @@ en la más conveniente.
 
 Al retractarse, la retractación se escribe **en el lugar donde estaba la afirmación**, no se borra.
 
+## Un campo impreso dentro de un veredicto hereda la autoridad del veredicto
+
+**No importa que el campo no se haya verificado: al estar en la misma línea que `VALID`, un lector
+razonable lo lee como parte de lo verificado.**
+
+Por eso **el arreglo no es agregar una advertencia — es sacarlo de esa línea.** Una aclaración al
+lado de una afirmación autorizada compite con la autoridad y pierde.
+
+Aplica a cualquier artefacto que mezcle **lo comprobado** con **lo transcripto**: el informe del
+verificador, el certificado emitido, cualquier resumen que ponga las dos cosas en la misma tabla.
+
+**Caso que la originó (2026-09-01):** `verify_certificate.py:1091` imprimía
+`VALID (keyId=<issuer.keyId>)`. Medido: firmado por una clave, con `issuer.keyId` nombrando otra,
+verificado contra la primera — el informe decía `VALID (keyId=<la que no firmó>)`. El campo nunca
+se comprobó; la línea lo publicaba con el peso de un veredicto. Y en `--json` es peor: viaja como
+la misma cadena (`:1524`), donde un consumidor automático la parsea como dato.
+
+**La prueba para aplicarla:** de cada cosa impresa junto a un veredicto, preguntar *¿esto lo
+comprobé, o lo estoy transcribiendo?* Lo transcripto va en otro lado, o no va.
+
 ## Método, en corto
 
 - **Verificar contra el código real antes de afirmar.** Un hallazgo no verificado no es un hecho, y
