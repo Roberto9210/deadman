@@ -1302,6 +1302,58 @@ Dos motivos, y el segundo pesa más que el primero:
    derivaron de una restricción real, no de haber leído lo mismo. **Eso sí es una derivación
    independiente**, que es exactamente lo que §5.11 pide y casi nunca hay.
 
+#### La autovigilancia de `certHash` es ELLA MISMA un acuerdo no examinado
+
+`certHash` está abajo porque el verificador lo recomputa en cada corrida. **Eso no es una propiedad
+del CAMPO: es una propiedad de la CONDUCTA DE ESTA VERSIÓN DEL VERIFICADOR** (operador, 1-sep). Si
+una versión futura cachea, agrega un modo rápido, o deja de recomputar por rendimiento, el ruido
+desaparece y el supuesto de la canonicalización se vuelve silencioso. **Y la pérdida de una
+comprobación es ella misma silenciosa: nadie recibe un aviso cuando deja de mirarse algo.**
+
+**Y no es un riesgo futuro: ya es un hecho presente.** Medido, con un `certHash` deliberadamente
+falso en los seis casos:
+
+| ruta | exit | ¿se recomputó `certHash`? |
+|---|---|---|
+| **CONTROL** certificado sano por lo demás | 1 | **SÍ** |
+| sin `ledgerDialect` | 2 | **NO** |
+| `ledgerDialect` desconocido | 2 | **NO** |
+| sin `claims.ledgerRange` | 2 | **NO** |
+| `ledgerRange` con `fromSeq > toSeq` | 2 | **NO** |
+| dialecto declarado ≠ el del archivo | **1** | **NO** |
+
+**Cinco de seis rutas ya lo saltean**, y una de ellas emite un **veredicto** (exit 1) sin haberlo
+comprobado nunca.
+
+En descargo del código: **todas esas rutas declaran que se detuvieron** — `cannot_evaluate` en las
+de exit 2, y `NOTHING_ELSE_CHECKED` explícito en la de exit 1 (`:1129`). Es §5.8 escalón 4 bien
+hecho, ya. **Pero declarar que un chequeo no corrió no es lo mismo que garantizar que corre**, y el
+ranking bajo de `certHash` depende de la garantía, no de la declaración.
+
+**Por eso va a §6, y no como definición de campo sino como CONDUCTA EXIGIDA:**
+
+> **Un verificador conforme DEBE recomputar `certHash`.**
+
+Sin esa línea, su ranking bajo es un dato sobre esta versión del verificador, no sobre el formato.
+Es la misma clase que §5.11 en otro plano: **una medición sobre la instancia actual leída como
+propiedad de la cosa.**
+
+#### Y «forzadas por el orden» explica QUÉ SE EXCLUYE, no QUÉ SE INCLUYE NI CÓMO
+
+Precisión que refina y no refuta (operador, 1-sep). Que la firma se compute sobre el hash fuerza
+las **dos exclusiones**, y eso sigue siendo derivación independiente genuina. Pero **el orden de
+claves, el formato de números, la normalización unicode y los espacios no los fuerza ninguna
+restricción.** Esa mitad del preimage está protegida por **ruido**, no por derivación.
+
+**Mi propia medición lo mostraba sin que yo lo viera:** «el emisor usando otra canonicalización da
+`CERTHASH_MISMATCH`» prueba que **el desvío es ruidoso**, no que la regla sea derivada. Son cosas
+distintas y yo las había cobrado como una sola.
+
+Así que `certHash` está abajo por **dos motivos de calidad distinta**, y **sólo uno sobrevive a un
+verificador que deje de comprobar**: la derivación de las exclusiones sobrevive; el ruido de la
+canonicalización no. Eso es lo que vuelve a «un verificador conforme DEBE recomputar» una línea que
+carga peso y no un adorno.
+
 **El que encabeza es «qué cuenta como episodio»**, y por los dos ejes a la vez: el lector del
 certificado depende de él (es el relato de lo que pasó), un supuesto compartido ahí **no produce
 ningún hallazgo** — medido, exit 0 —, y **ya se sabe equivocado**, porque la atribución por
@@ -1341,6 +1393,45 @@ que DEBE dar distinto— aplicada a la escritura de una especificación: **el co
 conteo de desvíos.** Y cada desvío se trata como hallazgo, nunca como error de transcripción: es la
 única evidencia de que la pregunta generadora fue de verdad distinta.
 
+### 6.2b El primer campo de §6 es un CONTROL DEL MÉTODO, y ya lo tenemos
+
+«Qué cuenta como episodio» encabeza la lista **y además tiene un error conocido adentro**: la
+atribución por adyacencia de DEF-2 vive en esa misma computación. **Eso no es una desgracia, es un
+regalo: el primer campo de §6 tiene respuesta conocida.**
+
+**El procedimiento, y se corre como control antes que como campo:** escribir la definición de
+episodio desde el lado del consumidor, pre-registrada y **sellada**, sin mirar ninguna de las dos
+implementaciones. Después abrir las dos.
+
+> **SI EL PROCESO ES REAL, TIENE QUE ENCONTRAR LA ATRIBUCIÓN POR ADYACENCIA SIN QUE NADIE SE LA
+> HAYA DICHO.**
+
+Si la encuentra, el método sirve **y se sabe sobre un caso con respuesta**. Si no la encuentra, el
+método no sirve y **se sabe barato**, en el único campo donde el fracaso es reconocible. Cualquier
+otro campo primero deja sin saber si cero desvíos fue éxito o convergencia inconsciente.
+
+#### La objeción que tengo que poner: yo soy el peor autor posible de ese pre-registro
+
+**Yo ya encontré la atribución por adyacencia.** El control pide que el proceso la descubra sin que
+nadie se la haya dicho, y **a mí me la dijo mi propia medición de ayer.** Si yo escribo el
+pre-registro sellado de episodios y «descubre» la adyacencia, eso no prueba que la pregunta
+generadora sea distinta: prueba que sé la respuesta. **Es el instrumento contestando por el sujeto
+(§ apéndice), en el lugar exacto donde el método se está validando a sí mismo.**
+
+No lo puedo neutralizar con cuidado. Tres salidas, y la elección es del operador:
+
+1. **Otro autor escribe ese pre-registro** — alguien que no haya visto `Certificate.cs:238` ni
+   `verify_certificate.py:974-982`. Es la única que preserva el control entero.
+2. **Se elige otro campo de validación**: uno cuya respuesta el operador conozca y yo no. El
+   fracaso sigue siendo reconocible —por él— y mi ignorancia es genuina.
+3. **Se acepta degradado y se dice:** yo escribo el pre-registro, y vale como prueba de que el
+   método **produce una definición utilizable**, no de que **descubra** lo que nadie le dijo. Es
+   estrictamente menos, y habría que no venderlo como más.
+
+**Mi recomendación es (2)**, porque conserva el control y no depende de conseguir un autor virgen:
+el valor del ejercicio está en que el fracaso sea reconocible, y para eso alcanza con que **alguien**
+sepa la respuesta — no hace falta que sea quien escribe.
+
 ### 6.3 El modelo ya probado en casa: los dialectos nombrados
 
 **Confirmado, medido literalmente.** El ledger tiene **dos dialectos NOMBRADOS** con reglas de hash
@@ -1371,6 +1462,20 @@ la pluralidad era **legítima** — dos productores, dos esquemas. Para «qué c
 de los dialectos sirve para la pluralidad genuina; el pre-registro de §6.2 sirve para la regla
 única que nadie miró.** §6 necesita los dos, y saber cuál aplica a cada campo es parte de
 escribirla.
+
+#### Orden de gravedad: DESVÍO, y por encima, NECESITA-DIALECTO
+
+Para cuando aparezca el primer caso ambiguo (operador, 1-sep):
+
+| hallazgo | qué dice |
+|---|---|
+| **desvío** | un lado se equivocó |
+| **necesita-dialecto** | **los dos lados nunca estuvieron computando lo mismo**, y el acuerdo de hoy es un artefacto de que un lado nunca ejercitó el caso del otro |
+
+**El segundo es más fuerte.** Un desvío se corrige. Un «necesita dialecto» descubierto escribiendo
+§6 desde el lado del consumidor significa que la coincidencia observada hasta hoy **no era acuerdo
+sino falta de ocasión** — y ésa es exactamente la forma que §5.11 no puede distinguir desde afuera,
+porque desde afuera se ve idéntica al acuerdo genuino.
 
 ## 7. Estado de los pedidos del emisor
 
