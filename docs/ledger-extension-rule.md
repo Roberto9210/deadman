@@ -299,14 +299,28 @@ El emisor tiene seis lugares con `?? ""` y el arreglo correcto es omitir la clav
 
 Así que el `?? ""` **ya está produciendo certificados que fallan** — la corrección no es cosmética.
 
-> **CONFIRMADO DESDE LOS DOS LADOS (2026-09-01).** Nosotros medimos que `""` da exit 1 con
-> `DECORATIVE_FIELD`; el lado del guardián confirma que `session.timezone` **sale vacío hoy** por
-> la ruta de LT-2 — el reinicio que restaura `ARMED` desde el sello. Es decir: no es un borde
-> teórico ni un descuido de estilo, es **un camino que el producto recorre normalmente**.
+> **RETRACTACIÓN (2026-09-01), y la afirmación retirada es mía.** Escribí acá un bloque titulado
+> «CONFIRMADO DESDE LOS DOS LADOS» que decía que `session.timezone` **sale vacío hoy** por la ruta
+> LT-2, y de ahí lo ascendí a «falla funcional en ruta alcanzable» y lo puse como paso 0 del orden
+> de trabajo. **La mitad del guardián era falsa.** Medido por Ventana A:
 >
-> Eso lo cambia de categoría: de **defecto de honestidad** a **falla funcional en ruta
-> alcanzable**, y por eso sube en el orden de trabajo (§8). Un certificado emitido después de un
-> reinicio normal falla la verificación.
+> - `sessionResetTimeZone` está en `GuardianConfig.RequiredKeys`: un config que no lo trae **no
+>   parsea**, así que nunca llega a ser un sello;
+> - el emisor lee la zona del **snapshot sellado**, la misma fuente que Core;
+> - los 6 certificados emitidos en esa máquina traen `America/Chicago`. Ninguno vacío.
+>
+> **Ese emisor no puede producir `""` en ese campo.** El paso 0 no existía.
+>
+> **Qué sobrevive, re-medido:** `""` da exit 1 con `DECORATIVE_FIELD`, `null` y ausente dan exit 0.
+> Eso está bien y **no se toca `DECORATIVE_FILLER` por esto**. Simplemente hoy no lo gatilla nadie
+> en ese emisor. El `?? ""` sigue siendo un defecto de honestidad —§5.6 manda ausente o `null`—
+> y vuelve a ser eso y nada más.
+>
+> **Y el error de método fue mío antes que de nadie.** Este documento etiqueta la procedencia de
+> cada afirmación del guardián —«no pude verificarlo, ese repositorio no es mío»— en todos lados
+> menos acá. La solté exactamente una vez, en la afirmación que era más conveniente: la que
+> convertía un hallazgo de estilo en una urgencia y me daba un paso 0. **Una medición mía más una
+> afirmación ajena no es una confirmación** (§5.9).
 Pero `dayKey` vive en el mismo objeto `session`, y ahí omitir desarma una protección. **El mismo
 patrón de arreglo, aplicado a dos campos vecinos, da un resultado correcto y un desastre.**
 
@@ -908,6 +922,37 @@ hace que algo se verifique MENOS y el documento no lo diga? Entonces no va.*
 
 ---
 
+## 5.9 — RULING — dos fuentes de calidad distinta no se suman
+
+> **Cuando se citen dos lados de algo, cada lado va con su procedencia pegada, y «confirmado» se
+> reserva para cuando LOS DOS son mediciones.**
+
+Adoptada 2026-09-01 después de que este documento publicara un bloque titulado «CONFIRMADO DESDE
+LOS DOS LADOS» cuya mitad ajena era falsa (§DEF-4, retractación).
+
+**El modo de falla es distinto de los anteriores y por eso va escrito aparte.** No fue inventar un
+dato, ni el instrumento contestando por el sujeto:
+
+> **Fue combinar una MEDICIÓN con una AFIRMACIÓN y llamar al resultado CONFIRMACIÓN.**
+
+Una medición propia y una afirmación ajena no verificada no se promedian: el resultado hereda la
+calidad de la **peor** de las dos, no de la mejor. Y la palabra «confirmado» hace exactamente lo
+contrario — hereda la calidad de la mejor, y borra la juntura donde estaba la duda.
+
+**Por qué es especialmente traicionero:** la mitad medida es verdadera. `""` **sí** da exit 1. Todo
+lo que se puede comprobar de la afirmación compuesta, comprueba. Lo que no aguanta es la parte que
+nadie verificó, y es justo la parte que aportaba la urgencia. **Una afirmación mitad medida no se
+ve como una afirmación a medias: se ve como una afirmación con evidencia.**
+
+**Cómo se aplica.** Cada afirmación de dos fuentes se escribe con las dos procedencias visibles:
+*«medido acá: X. Reportado por el otro lado, no verificado por nosotros: Y.»* La conclusión
+conjunta se marca con la calidad de la peor mitad. **«Confirmado» es una palabra reservada**, no un
+sinónimo de «coincide con lo que esperaba». Y la señal de alarma es la conveniencia: la afirmación
+que asciende un hallazgo a urgencia, o que produce un paso 0, es la que hay que releer con la
+procedencia delante.
+
+---
+
 # PARTE IV — LO QUE FALTA DEBAJO DE TODO
 
 ## 6. El verificador de la evidencia cita una especificación que nunca se versionó
@@ -938,14 +983,11 @@ porque hoy cita cuatro secciones de un documento que no tiene.
 
 ## 8. — RULING — Orden de trabajo
 
-0. **`session.timezone: ""`, del lado del emisor** — es la única falla **funcional** de la lista y
-   ya se dispara sola por la ruta LT-2. No depende de nosotros y no hay que esperar a nada: campo
-   ausente o `null`. Va en cero porque cada certificado emitido tras un reinicio normal está
-   fallando mientras esto no salga.
-1. **DEF-3, las dos mitades** — la inversión **y** la procedencia. Sube de sexto a primero: es lo
-   único que hoy hace **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros
-   tres defectos dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el
-   verificador.
+1. **DEF-3, las dos mitades** — la inversión **y** la procedencia. **Arranca acá**, que es donde
+   su propio argumento ya lo ponía antes de que yo inventara un paso 0: es lo único que hoy hace
+   **rechazar certificados honestos**, ya está probado y pasa 100/100. Los otros tres defectos
+   dejan pasar algo malo; éste rechaza algo bueno, que es lo que enseña a apagar el verificador.
+   *(El paso 0 que había acá —`session.timezone`— se retiró: ver la retractación en §DEF-4.)*
 2. **DEF-2** — renombrar a `precedingEvent`/`precedingSeq`, **empezar a compararlo**, y la
    limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
    comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
@@ -965,7 +1007,7 @@ porque hoy cita cuatro secciones de un documento que no tiene.
 
 | cuántos | qué significa | quién cae acá |
 |---|---|---|
-| **cero** | se dispara solo, en operación normal | `session.timezone: ""` (ruta LT-2) |
+| **cero** | se dispara solo, en operación normal | *(vacío hoy — el candidato que puse acá se retiró, ver §DEF-4)* |
 | **uno** | el productor se equivoca y el documento sale falso | DEF-2, DEF-4 |
 | **dos** | alguien tiene que ir a usar el agujero | DEF-1 |
 

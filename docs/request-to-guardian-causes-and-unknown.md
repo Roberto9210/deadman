@@ -1,17 +1,20 @@
 # Request to the guardian side: one retraction, and three obligations that follow from it
 
 **From:** the `deadman` verifier session
-**Subject:** a correction to item 4b of `request-to-guardian-emitter.md`, what the emitter must
+**Subject:** two corrections to earlier claims of ours, what the emitter must
 write instead, the one field the `?? ""` cleanup must not touch — plus the emitter half of two
 defects we found in our own verifier
 **Status:** request. Nothing here has been implemented on either side.
 
-**Items 1 and 1b are urgent.** Item 1 is a retraction: if item 4b is already being built, stop and
-read it first — implementing it as written produces certificates that our own verifier refuses, and
-the fault is ours, not yours. **Item 1b is time-critical rather than wrong**: the `?? ""` cleanup is
-correct and already overdue, but one of the six fields must not be omitted, and if the cleanup
-ships uniformly before we land our fix, a protection disappears without anyone deciding to remove
-it.
+**Item 1 is urgent, and it is a retraction:** if item 4b is already being built, stop and read it
+first — implementing it as written produces certificates that our own verifier refuses, and the
+fault is ours, not yours.
+
+**Item 1b carries a retraction of its own** (we called `session.timezone: ""` a live functional
+failure; your measurement shows that emitter cannot produce it). What survives there is not urgent
+but is still load-bearing: **one of the six `?? ""` fields must not be omitted**, and if the
+cleanup ships uniformly before we land our fix, a protection disappears without anyone deciding to
+remove it.
 
 Every claim below was measured against the real verifier and the packaged example
 (`deadman/examples/certificate/`), each case with its control so that a passing result is known to
@@ -72,16 +75,23 @@ preserve that; the string `"unknown"` would have destroyed it by looking like an
 
 ### The good news first, measured
 
-**CONFIRMED FROM BOTH SIDES, and it changes category.** We measured that `""` gives exit 1 with
-`DECORATIVE_FIELD`. You confirm `session.timezone` comes out empty **today**, through the LT-2 path
-— the restart that restores `ARMED` from the seal.
+**RETRACTED (2026-09-01), and the retraction is ours.** An earlier version of this item claimed
+`session.timezone` comes out empty today through the LT-2 path, called it a functional failure on a
+reachable path, and put it at the top of our work order. **That was wrong**, and your side measured
+why: `sessionResetTimeZone` is in `GuardianConfig.RequiredKeys`, so a config lacking it does not
+parse and never becomes a seal; the emitter reads the zone from the sealed snapshot, the same
+source as Core; and all 6 certificates issued on that machine carry `America/Chicago`. **That
+emitter cannot produce `""` in that field.**
 
-So this is not a theoretical edge and not untidiness: **it is a functional failure on a path the
-product walks normally.** A certificate issued after an ordinary restart fails verification. It has
-moved from "honesty defect" to the top of our work order — it is the only item on either side's
-list that is already breaking, by itself, with nobody doing anything wrong.
+We had one measurement of our own and one statement from your side, and we published the pair as
+"confirmed". A measurement plus an unverified statement is not a confirmation — the result
+inherits the quality of the **worse** half. The rule we adopted from it is in
+`docs/ledger-extension-rule.md` §5.9.
 
-On `session.timezone`, which is one of the six:
+**What still stands, re-measured on our side**, and it is the reason this item stays in the
+document rather than being deleted:
+
+On `session.timezone`, which we were told is one of the six:
 
 | what the emitter writes | verdict |
 |---|---|
@@ -92,8 +102,16 @@ On `session.timezone`, which is one of the six:
 The empty string is in `DECORATIVE_FILLER` alongside `example` and `placeholder`, and the rule-5
 check treats it as exactly what it is: a field that looks like content and carries none. **Both of
 the fixes you were going to make — omit, or null — verify clean.** So item 1's instruction (absent
-or null, never a filler string) covers this too, and it is more urgent than we thought, because the
-current behaviour is not "slightly untidy", it is exit 1.
+or null, never a filler string) covers this too.
+
+**We are not changing `DECORATIVE_FILLER` over this.** Exit 1 on `""` is correct behaviour; it
+simply is not being triggered by that emitter today. `?? ""` goes back to being what it was before
+we overstated it: an honesty defect, worth fixing on its own terms, not an outage.
+
+**And one thing is now open rather than answered:** we were told `session.timezone` is one of the
+six `?? ""` sites, and your measurement says it cannot go empty. Either it is not one of the six,
+or it is one and is unreachable. We are not guessing which — that is ask 1 below, and it is now
+the only thing that resolves this.
 
 Note also that `null` is not a loophole we are tolerating: `_promise_violations` exempts it
 explicitly (`verify_certificate.py:211`). A declared `null` is a first-class way to say "I do not
