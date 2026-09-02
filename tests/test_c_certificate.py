@@ -27,7 +27,7 @@ import pytest
 
 from deadman.verify_certificate import (
     DEADMAN_KIT_V1, EXIT_CONTRADICTED, EXIT_OK, EXIT_UNEVALUABLE, GUARDIAN_CORE_V1,
-    REQUIRED_LIMITATIONS, _cert_preimage, canonical_json, recompute_claims,
+    REQUIRED_LIMITATIONS, _cert_preimage, _sha256_hex, canonical_json, recompute_claims,
     verify_certificate, verify_series,
 )
 
@@ -1078,6 +1078,113 @@ def test_def7_an_integer_is_no_longer_quietly_accepted_as_true():
     rep = verify_certificate(cert, entries)
     assert rep.exit_code == EXIT_CONTRADICTED
     assert "neither a boolean nor one of" in " ".join(f.detail for f in rep.contradictions)
+
+
+# ================================================================== DEF-4
+
+def _drop(rows, event):
+    """The ledger without a given event, re-chained."""
+    prev, out = "genesis", []
+    for r in rows:
+        if r.get("event") == event:
+            continue
+        r = dict(r)
+        r["seq"] = len(out) + 1
+        r["prev"] = prev
+        r.pop("hash", None)
+        r["hash"] = GUARDIAN_CORE_V1.hash_of(r)
+        prev = r["hash"]
+        out.append(r)
+    return out
+
+
+def _unscoped(cert):
+    """The same certificate with no declared day, resealed."""
+    cert = json.loads(json.dumps(cert))
+    (cert.get("session") or {}).pop("dayKey", None)
+    cert.pop("certHash", None)
+    cert["certHash"] = _sha256_hex(_cert_preimage(cert))
+    return cert
+
+
+def test_def4_a_truncated_range_is_caught_with_or_without_a_declared_day():
+    """A SEVERITY THAT DEPENDS ON A FIELD BEING PRESENT CAN BE BOUGHT BY OMITTING DATA.
+
+    `session.dayKey` used to gate the whole coverage check. Measured on the repository's own
+    example of the most dangerous lie the format allows, removing the key took it from
+    RANGE_TRUNCATED at exit 1 down to exit 0 - and nobody had to forge anything, only to leave a
+    key out."""
+    ex = Path(__file__).resolve().parents[1] / "deadman" / "examples" / "certificate"
+    cert = json.loads((ex / "certificate-truncated.json").read_text(encoding="utf-8"))
+    entries = [json.loads(l) for l in
+               (ex / "ledger.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+
+    scoped = verify_certificate(cert, entries)
+    assert scoped.exit_code == EXIT_CONTRADICTED
+    assert "RANGE_TRUNCATED" in codes(scoped)
+
+    for strip in (lambda c: c["session"].pop("dayKey"),
+                  lambda c: c["session"].__setitem__("dayKey", None),
+                  lambda c: c.pop("session")):
+        c = json.loads(json.dumps(cert))
+        strip(c)
+        c.pop("certHash", None)
+        c["certHash"] = _sha256_hex(_cert_preimage(c))
+        rep = verify_certificate(c, entries)
+        assert rep.exit_code == EXIT_CONTRADICTED, "the lie must survive losing its own scope"
+        assert "RANGE_TRUNCATED" in codes(rep)
+
+
+def test_def4_a_missing_scope_says_the_check_did_not_run():
+    """§5.8 rung 4: a key whose absence turns a check off must SAY so. Silence turns a less
+    verified document into one indistinguishable from a more verified one."""
+    entries = gledger(QUIET_DAY)
+    rep = verify_certificate(_unscoped(make_cert(entries)), entries)
+    assert "SCOPE_MISSING" in {f.code for f in rep.unverified}
+    assert "did not run" in " ".join(f.detail for f in rep.unverified)
+
+
+def test_def4_an_honest_export_without_a_day_is_not_accused():
+    """CONTROL. Removing the gate must not turn every unscoped certificate into a liar."""
+    entries = gledger(QUIET_DAY)
+    assert verify_certificate(_unscoped(make_cert(entries)), entries).exit_code == EXIT_OK
+
+
+def test_def4_an_honest_mid_session_export_is_still_only_unverified():
+    """THE CONTROL THE REFINEMENT EXISTS FOR, and it is why the anchor is a close that HAPPENED
+    rather than material events alone.
+
+    A session still running has material events after any export taken from it - that is what
+    *still running* means. Charging those would make every honest mid-session export a lie, which
+    is the calibration mistake this file keeps being written to avoid. So the contradiction needs
+    a session that demonstrably ENDED past the range; with no DAY_CLOSED anywhere, it stays
+    `cannot_verify` whether or not a day is declared."""
+    entries = _drop(gledger(DISCONNECT_DAY), "DAY_CLOSED")
+    i = next(n for n, r in enumerate(entries) if r.get("event") == "FAIL_CLOSED_ENTERED")
+    early = entries[:i]                               # the export stops before the material event
+    cert = make_cert(early)
+
+    for c in (cert, _unscoped(cert)):
+        rep = verify_certificate(c, entries)
+        assert rep.exit_code != EXIT_CONTRADICTED
+        assert "RANGE_TRUNCATED" not in codes(rep)
+        assert "POST_RANGE_MATERIAL_EVENTS" in {f.code for f in rep.unverified}
+
+
+def test_def4_the_gap_is_explained_with_the_right_cause():
+    """The replacement message used to say "with no DAY_CLOSED for this session" even when the
+    real reason was that the certificate named no day - a message explaining a gap with the wrong
+    cause, which is the defect this verifier keeps finding in other people's artefacts."""
+    entries = _drop(gledger(DISCONNECT_DAY), "DAY_CLOSED")
+    i = next(n for n, r in enumerate(entries) if r.get("event") == "FAIL_CLOSED_ENTERED")
+    cert = make_cert(entries[:i])
+
+    scoped = " ".join(f.detail for f in verify_certificate(cert, entries).unverified)
+    assert "no DAY_CLOSED for this session" in scoped
+
+    unscoped = " ".join(f.detail for f in verify_certificate(_unscoped(cert), entries).unverified)
+    assert "names no day" in unscoped
+    assert "no DAY_CLOSED for this session" not in unscoped
 
 
 def test_the_verifier_can_actually_refuse():

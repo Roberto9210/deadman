@@ -756,7 +756,43 @@ decía seis; la enumeración de Ventana A dice siete. Es exactamente el tipo de 
 Pero `dayKey` vive en el mismo objeto `session`, y ahí omitir desarma una protección. **El mismo
 patrón de arreglo, aplicado a dos campos vecinos, da un resultado correcto y un desastre.**
 
-### La salida
+### APLICADO (2026-09-02)
+
+**La severidad dejó de depender de que el campo esté.** El daño se establece primero —eventos
+materiales fuera del rango— y `dayKey` sólo hace el ancla más precisa. Medido sobre el ejemplo
+propio del repo:
+
+| `certificate-truncated.json` | antes | ahora |
+|---|---|---|
+| como se publica | exit 1 `RANGE_TRUNCATED` | exit 1 `RANGE_TRUNCATED` |
+| **sin `dayKey`** | **exit 0** | **exit 1 `RANGE_TRUNCATED`** + `SCOPE_MISSING` |
+| **`dayKey` = `null`** | **exit 0** | **exit 1** |
+| **sin el bloque `session`** | **exit 0** | **exit 1** |
+| **CONTROL** día limpio sin `dayKey` | exit 0 | **exit 0** + `SCOPE_MISSING` |
+
+Y `SCOPE_MISSING` dice lo que §5.8 escalón 4 exige: *el chequeo no corrió*, no que haya pasado.
+
+#### Una precisión sobre el ruling, medida antes de defenderla
+
+El ruling decía: *si hay eventos materiales fuera del rango, es contradicción con `dayKey` y sin
+él*. **Aplicado tal cual acusaría a todo export honesto de mitad de sesión** — una sesión que
+sigue corriendo tiene eventos materiales después de cualquier export que se le tome, porque eso es
+lo que *sigue corriendo* significa. Es exactamente la clase de daño que este archivo lleva toda la
+tanda quitando.
+
+Así que el ancla sin `dayKey` **no es «hay material afuera» sino «una sesión CERRÓ pasado el
+rango»**: un `DAY_CLOSED` después de `toSeq` prueba que el registro siguió y terminó. Eso cierra
+la brecha del ejemplo truncado —que tiene su `DAY_CLOSED` en seq 16— sin cargar contra nadie
+honesto. Control medido: con el `DAY_CLOSED` quitado del ledger, un export temprano con material
+después queda en `POST_RANGE_MATERIAL_EVENTS` (`cannot_verify`), con y sin `dayKey`.
+
+#### Y el mensaje explicaba la brecha con la causa equivocada
+
+Decía *«with no DAY_CLOSED for this session»* incluso cuando el motivo real era que el certificado
+**no nombra ningún día**. Corregido: ahora dice cuál de las dos cosas pasó. Era el mismo defecto
+que este verificador le viene encontrando a los artefactos ajenos, en su propia salida.
+
+*(La salida original decía:)*
 
 `session.dayKey` ausente tiene que pasar de **silencio** a **`cannot_verify`**: el chequeo de
 cobertura no corrió, y eso se dice. No a contradicción — un certificado sin `dayKey` no es falso,
@@ -1855,7 +1891,7 @@ corregir los blobs, o corregir la frase.
    limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
    comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
 4. **DEF-6 primera mitad** — **HECHO (2026-09-01, `514205c`)**: el truncamiento deja de acusar.
-5. **DEF-4** — `session.dayKey` ausente pasa a `cannot_verify`, y la severidad sigue al daño, con
+5. ~~**DEF-4**~~ — **HECHO (2026-09-02)**: la severidad sigue al daño y ya no depende de que `dayKey` esté. Era: con
    `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
    limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
 5. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de

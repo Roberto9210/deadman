@@ -700,55 +700,94 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
         elif seq > to_seq:
             outside_after.append(e)
 
+    # SEVERITY FOLLOWS THE HARM, NOT THE PRESENCE OF A FIELD.
+    #
+    # `session.dayKey` used to gate this whole check: without it nothing ran, and nothing said so.
+    # Measured on the repository's own `certificate-truncated.json` - the shipped example of "the
+    # most dangerous lie the format allows" - removing `dayKey` took it from RANGE_TRUNCATED at
+    # exit 1 down to exit 0. Not silence exactly: `POST_RANGE_MATERIAL_EVENTS` still fired and
+    # still named the hidden events, but as `cannot_verify`. A DOWNGRADE IS WORSE THAN SILENCE: a
+    # reader files "could not verify" as inconclusive, and it was conclusive and ugly.
+    #
+    # AND A SEVERITY THAT DEPENDS ON A FIELD BEING PRESENT CAN BE BOUGHT BY OMITTING DATA. Nobody
+    # has to forge anything; it is enough not to write a key.
+    #
+    # So the harm is established first, and `dayKey` only makes the anchor more precise.
+    hidden = [e for e in outside_before + outside_after if e.get(ev) in _MATERIAL]
+
+    # A GUARDIAN_STARTED is not material in itself - ordinary restarts happen constantly and
+    # flagging them would make every honest early export a contradiction. An ORPHANED one is:
+    # it is the evidence of an ungraceful shutdown, and excluding it from the range is exactly
+    # how that evidence would be dropped from the continuity block.
+    # ...and only when it was cut off the FRONT. A restart that happened after the export
+    # is not hidden by the certificate, it merely postdates it - treating those as
+    # contradictions would call every honest mid-session export a liar, which is the same
+    # calibration mistake this check was written to avoid in the first place.
+    hidden += [e for e in outside_before
+               if e.get(ev) == "GUARDIAN_STARTED"
+               and _preceded_by_clean_stop(entries, dialect, e) is False]
+
     if day is not None:
         opened = [e for e in outside_before if e.get(ev) == "DAY_OPENED" and day_of(e) == day]
         closed = [e for e in outside_after if e.get(ev) == "DAY_CLOSED" and day_of(e) == day]
-        hidden = [e for e in outside_before + outside_after if e.get(ev) in _MATERIAL]
-
-        # A GUARDIAN_STARTED is not material in itself - ordinary restarts happen constantly and
-        # flagging them would make every honest early export a contradiction. An ORPHANED one is:
-        # it is the evidence of an ungraceful shutdown, and excluding it from the range is exactly
-        # how that evidence would be dropped from the continuity block.
-        # ...and only when it was cut off the FRONT. A restart that happened after the export
-        # is not hidden by the certificate, it merely postdates it - treating those as
-        # contradictions would call every honest mid-session export a liar, which is the same
-        # calibration mistake this check was written to avoid in the first place.
-        hidden += [e for e in outside_before
-                   if e.get(ev) == "GUARDIAN_STARTED"
-                   and _preceded_by_clean_stop(entries, dialect, e) is False]
         edge = closed[0] if closed else (opened[0] if opened else None)
+        where = ("" if edge is None else
+                 ("that day's DAY_CLOSED is at seq %s, past the declared range" % edge[seqf]
+                  if closed else
+                  "that day's DAY_OPENED is at seq %s, before the declared range" % edge[seqf]))
+        subject = f"the certificate is for {day} but"
+    else:
+        # No declared day, so no day to match against. What can still be established is that a
+        # SESSION CLOSED past the range: a DAY_CLOSED after `to_seq` means the record kept going
+        # and ended, so the range stops short of a session that finished.
+        #
+        # ANCHORED ON A CLOSE THAT HAPPENED, NOT ON THE ABSENCE OF ONE. The instruction was
+        # "material events outside the range are a contradiction whether or not dayKey is there";
+        # applied unconditionally that would charge every honest mid-session export, which has
+        # material events after it precisely because the session was still running. That is the
+        # harm class this whole file has spent its time removing, so the anchor stays: a session
+        # that demonstrably ENDED past the declared range.
+        closed = [e for e in outside_after if e.get(ev) == "DAY_CLOSED"]
+        edge = closed[0] if closed else None
+        where = ("" if edge is None else
+                 "a DAY_CLOSED sits at seq %s, past the declared range" % edge[seqf])
+        subject = "the certificate names no day, and"
+        rep.cannot_verify(
+            "SCOPE_MISSING",
+            "the certificate carries no `session.dayKey`, so the session-coverage check could not "
+            "be anchored to the day it describes. This is NOT the same as the check passing: it "
+            "did not run. What was still checked is below, from the ledger alone")
 
-        if edge is not None:
-            where = ("that day's DAY_CLOSED is at seq %s, past the declared range" % edge[seqf]
-                     if closed else
-                     "that day's DAY_OPENED is at seq %s, before the declared range" % edge[seqf])
-            # Severity follows the harm, not the shape. A range that stops early with nothing
-            # material outside it is an incomplete document; a range that stops early with a
-            # breach outside it is the lie this check exists for.
-            if hidden:
-                names = sorted({str(e.get(ev)) for e in hidden})
-                rep.contradict("RANGE_TRUNCATED",
-                               f"the certificate is for {day} but {where} {from_seq}..{to_seq}, "
-                               f"and {len(hidden)} material event(s) fall outside it "
-                               f"({', '.join(names)}) - the range excludes part of the session it "
-                               f"claims to describe")
-            else:
-                rep.cannot_verify("SESSION_NOT_FULLY_COVERED",
-                                  f"the certificate is for {day} but {where} {from_seq}..{to_seq}: "
-                                  f"this is part of that session, not all of it. Nothing material "
-                                  f"sits outside the range, so nothing is being hidden - but for a "
-                                  f"complete day, export again after the session closes")
-            return
+    if edge is not None:
+        if hidden:
+            names = sorted({str(e.get(ev)) for e in hidden})
+            rep.contradict("RANGE_TRUNCATED",
+                           f"{subject} {where} {from_seq}..{to_seq}, and {len(hidden)} material "
+                           f"event(s) fall outside it ({', '.join(names)}) - the range excludes "
+                           f"part of the session it claims to describe")
+        else:
+            rep.cannot_verify("SESSION_NOT_FULLY_COVERED",
+                              f"{subject} {where} {from_seq}..{to_seq}: this is part of that "
+                              f"session, not all of it. Nothing material sits outside the range, "
+                              f"so nothing is being hidden - but for a complete day, export again "
+                              f"after the session closes")
+        return
 
     material_after = [e for e in outside_after if e.get(ev) in _MATERIAL]
     if material_after:
         names = sorted({str(e.get(ev)) for e in material_after})
+        # The reason is stated CORRECTLY. This message used to say "with no DAY_CLOSED for this
+        # session" in both cases, which was false whenever the real cause was that the certificate
+        # named no day at all - a message explaining a gap with the wrong cause, which is the
+        # defect this verifier keeps finding in other people's artefacts.
+        why = ("this certificate names no day, so no session boundary could be matched"
+               if day is None else "no DAY_CLOSED for this session appears after the range")
         rep.cannot_verify("POST_RANGE_MATERIAL_EVENTS",
                           f"{len(material_after)} event(s) after the declared range are of a kind "
-                          f"that changes what a certificate says ({', '.join(names)}); with no "
-                          f"DAY_CLOSED for this session the verifier cannot tell an export taken "
-                          f"mid-session from a range truncated to exclude them - ask for a "
-                          f"certificate covering the closed session")
+                          f"that changes what a certificate says ({', '.join(names)}); {why}, so "
+                          f"the verifier cannot tell an export taken mid-session from a range "
+                          f"truncated to exclude them - ask for a certificate covering the closed "
+                          f"session")
 
 
 #: A BOUND IS ONLY WORTH PUBLISHING WHEN IT CONSTRAINS.
