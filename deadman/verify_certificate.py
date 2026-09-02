@@ -792,6 +792,61 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
                           f"session")
 
 
+#: THE VOCABULARY THIS VERSION KNOWS, per dialect.
+#:
+#: An event name outside these is reported - `cannot_verify`, never a refusal. The three ways a
+#: verifier can meet something it does not know are all defensible and the choice is a product
+#: one, so it was made explicitly:
+#:
+#:   REJECTING is catastrophic. An old verifier would declare a legitimate ledger invalid, and one
+#:   future event type would invalidate every certificate already issued.
+#:
+#:   IGNORING an event is a silent lie: it says *fine* about a record containing things it did not
+#:   understand. (Ignoring an unknown FIELD is different and is what happens - safe only because
+#:   the hashed body is now a blocklist, so an unknown field is inside the signature. See
+#:   ledger.py::HASH_EXCLUDED.)
+#:
+#:   MARKING says *I verified what I could and there is content I do not understand*, which is the
+#:   only honest one and the same shape as everything else here: the absence speaks.
+#:
+#: Declared as a list, so §5.7 applies: A LEXICAL LIST IS TESTED AGAINST THE REAL VOCABULARY. The
+#: sweep is in tests/test_c_certificate.py and asserts this fires on nothing a real ledger holds.
+#: `HUMAN_*` is known BY PREFIX rather than by name - the point of the prefix is that the verifier
+#: knows exactly what to do with those without being told each one (nothing: they are testimony
+#: about a person, never an input to a claim).
+#:
+#: The kit's list is written out instead of imported: this module imports nothing from the package
+#: on purpose, so a recipient can run the single file. `test_the_kit_vocabulary_here_matches_the
+#: _kit_itself` is what stops the copy drifting.
+KNOWN_EVENTS: dict[str, frozenset] = {
+    "guardian-core-v1": frozenset({
+        "GUARDIAN_STARTED", "GUARDIAN_STOPPED", "CONFIG_LOADED", "CONFIG_CHANGE_REJECTED",
+        "CONFIG_TAMPERED", "ARMED", "DISARMED", "SEAL_CREATED", "SEAL_EXPIRED", "SEAL_MISMATCH",
+        "DAY_OPENED", "DAY_CLOSED", "FAIL_CLOSED_ENTERED", "FAIL_CLOSED_CLEARED",
+        "ACCOUNT_UNKNOWN", "PNL_CHECKPOINT", "PNL_DISAGREEMENT", "LIMIT_BREACHED",
+        "ORDER_REJECTED_LOCKED", "ORDERS_CANCELLED", "FLATTEN_REQUESTED", "FLATTEN_VERIFIED",
+        "LOCKOUT_INCOMPLETE", "CLOCK_ANOMALY", "CLOCK_SUSPECT", "LEDGER_VERIFY_FAILED",
+        "STATE_CORRUPT",
+    }),
+    "deadman-kit-v1": frozenset({
+        "ANCHOR_PUBLISHED", "ANCHOR_FAILED", "ANCHOR_STALE", "ANCHOR_RECOVERED", "KILL_ENGAGED",
+        "KILL_RELEASED", "HALT_SET", "HALT_CLEARED", "INTENT_DENIED", "ORDER_SENT", "FILL",
+        "PARTIAL_FILL", "NO_FILL_CANCELED", "UNKNOWN_STATE", "RECONCILE_REPORT",
+        "DAILY_STATS_RESET", "LEDGER_ROTATED", "CONCURRENT_WRITER_DETECTED", "USER_NOTE",
+    }),
+}
+
+
+def unknown_event_kinds(rows: Sequence[Mapping[str, Any]], dialect: Dialect) -> list[str]:
+    """Distinct event names this version has no rule for. Sorted, deduplicated, named once.
+
+    Once, because a line repeated for every occurrence is how a warning becomes wallpaper."""
+    known = KNOWN_EVENTS.get(dialect.name, frozenset())
+    seen = {r.get(dialect.f_event) for r in rows}
+    return sorted(str(n) for n in seen
+                  if isinstance(n, str) and n not in known and not _is_human(n))
+
+
 #: A BOUND IS ONLY WORTH PUBLISHING WHEN IT CONSTRAINS.
 #:
 #: The general rule, written here because it will apply again: a bound is information when the
@@ -1368,6 +1423,17 @@ def verify_certificate(cert: Mapping[str, Any],
 
     present = {e.get(dialect.f_seq) for e in ledger_entries}
     absent = [s for s in range(from_seq, to_seq + 1) if s not in present]
+
+    unknown = unknown_event_kinds(_events_in_range(ledger_entries, dialect, from_seq, to_seq),
+                                  dialect)
+    if unknown:
+        rep.cannot_verify(
+            "UNKNOWN_EVENT_KIND",
+            f"the ledger contains {len(unknown)} event type(s) this version has no rule for "
+            f"({', '.join(unknown)}). Every claim above was recomputed without them, so if any of "
+            f"them should have counted, this verifier did not know. It is not evidence of anything "
+            f"wrong - a newer emitter writes events an older verifier has not been taught - but a "
+            f"newer verifier may reach a different answer over the same ledger")
 
     _check_range_covers_its_day(cert, ledger_entries, dialect, from_seq, to_seq, rep)
 

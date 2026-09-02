@@ -1154,6 +1154,26 @@ versión nueva para no fallar, que es justo el costo que la regla existe para ev
    adyacencia). Nombre y tipo son las dos formas en que **un campo promete una capacidad que no
    tiene** — el nombre promete saber *qué*, el tipo promete poder decir *cuánto sabe*.
 
+## 5.3 — RULING — Verificador viejo ante algo que no conoce · **APLICADO 2026-09-02**
+
+**Implementado**: `UNKNOWN_EVENT_KIND` como `cannot_verify`, nombrando los tipos **una vez** cada
+uno — una línea repetida por ocurrencia es cómo un aviso se vuelve empapelado. `KNOWN_EVENTS`
+declara el vocabulario por dialecto, y `HUMAN_*` se conoce **por prefijo**: el acuse no puede
+marcarse como incomprendido cuando su manejo es justamente deliberado.
+
+La condición que ataba este ruling a DEF-1 **está cumplida**: ignorar un campo desconocido es
+seguro porque el cuerpo hasheado ya es lista negra, así que un campo nuevo está dentro de la firma.
+
+El vocabulario del kit se escribe **dos veces** — `verify_certificate.py` no importa nada del
+paquete a propósito, para que un receptor pueda correr el archivo solo — y un test exige que la
+copia sea igual a `KINDS`, que es lo que impide que se separen.
+
+Y §5.7 aplica, con su barrido: **el vocabulario entero declarado pasa por la marca y no dispara
+ninguna**, con el control de que tres nombres inventados sí. Una lista léxica que se enciende sobre
+contenido honesto es peor que no tenerla: enseña a ignorar la línea.
+
+*(El ruling original, tal como se decidió:)*
+
 ## 5.3 — RULING — Verificador viejo ante algo que no conoce
 
 **MARCAR para eventos desconocidos. IGNORAR para campos desconocidos.**
@@ -1929,7 +1949,7 @@ corregir los blobs, o corregir la frase.
 5. ~~**DEF-1**~~ — **HECHO (2026-09-02)**: lista negra `{hash, sig}`; un campo nuevo nace dentro de la firma. Era: con el test de
    inyección top-level como control.
 6. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
-7. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.
+7. ~~El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.~~ — **HECHO (2026-09-02)**
 8. El papel de `keyId` en sí — espera §6. El arreglo mínimo ya salió en el paso 2.
 9. Escribir §5 donde se decida en §6.
 10. Recién entonces, el evento de acuse.

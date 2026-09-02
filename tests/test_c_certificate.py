@@ -1187,6 +1187,114 @@ def test_def4_the_gap_is_explained_with_the_right_cause():
     assert "no DAY_CLOSED for this session" not in unscoped
 
 
+# ================================================================== unknown event kinds
+
+def _with_event(name, where="inside"):
+    """The disconnect day with one extra event of the given name, re-chained."""
+    from deadman.verify_certificate import GUARDIAN_CORE_V1 as GC
+    rows = gledger(DISCONNECT_DAY)
+    i = next(n for n, r in enumerate(rows) if r.get("event") == "FAIL_CLOSED_ENTERED")
+    rows.insert(i + 1 if where == "inside" else i,
+                {"event": name, "payload": {}, "schemaVersion": 1, "seq": 0,
+                 "tsUtc": "2026-02-18T15:59:00.000Z"})
+    prev, out = "genesis", []
+    for r in rows:
+        r = dict(r)
+        r["seq"] = len(out) + 1
+        r["prev"] = prev
+        r.pop("hash", None)
+        r["hash"] = GC.hash_of(r)
+        prev = r["hash"]
+        out.append(r)
+    return out
+
+
+def _unverified(rep):
+    return {f.code for f in rep.unverified}
+
+
+def test_an_unknown_event_kind_is_MARKED_not_ignored_and_not_refused():
+    """Three defensible answers, one chosen. REJECTING is catastrophic - an old verifier would
+    call a legitimate ledger invalid, and one future event type would invalidate every certificate
+    already issued. IGNORING is a silent lie: *fine* about a record it did not understand. MARKING
+    says what is true, and leaves the verdict alone."""
+    entries = _with_event("SOMETHING_THIS_VERSION_NEVER_HEARD_OF")
+    rep = verify_certificate(make_cert(entries), entries)
+
+    assert "UNKNOWN_EVENT_KIND" in _unverified(rep)
+    assert rep.exit_code != EXIT_CONTRADICTED, "an unknown event is not a lie"
+    assert not any("UNKNOWN_EVENT_KIND" in f.code for f in rep.contradictions)
+    detail = " ".join(f.detail for f in rep.unverified)
+    assert "SOMETHING_THIS_VERSION_NEVER_HEARD_OF" in detail
+
+
+def test_the_whole_known_vocabulary_marks_nothing():
+    """§5.7 obligation 2: A LEXICAL LIST IS TESTED AGAINST THE REAL VOCABULARY.
+
+    A list of names that fires on honest content is worse than no list - it teaches people to
+    ignore the line, and then the line protects nobody. Every name this version claims to know is
+    swept through, one at a time."""
+    from deadman.verify_certificate import KNOWN_EVENTS
+    vocabulary = KNOWN_EVENTS["guardian-core-v1"]
+    assert len(vocabulary) > 20, "the vocabulary went missing, so this sweep proves nothing"
+
+    for name in sorted(vocabulary):
+        entries = _with_event(name)
+        rep = verify_certificate(make_cert(entries), entries)
+        assert "UNKNOWN_EVENT_KIND" not in _unverified(rep), f"{name} was called unknown"
+
+
+def test_the_sweep_is_capable_of_failing():
+    """CONTROL for the sweep. Without it, the test above passes just as well if the check is
+    dead."""
+    marked = 0
+    for name in ("NOT_A_REAL_EVENT", "ANOTHER_ONE", "CONFIG_LOADED_TYPO"):
+        entries = _with_event(name)
+        if "UNKNOWN_EVENT_KIND" in _unverified(verify_certificate(make_cert(entries), entries)):
+            marked += 1
+    assert marked == 3
+
+
+def test_a_human_event_is_known_by_its_prefix():
+    """The acknowledgement is a new event type and must NOT be marked unknown: the verifier knows
+    exactly what to do with a HUMAN_* event without being taught each one - nothing, because it is
+    testimony about a person and never an input to a claim. Being told *I do not understand this*
+    about the one event whose handling is deliberate would be false."""
+    entries = _with_event("HUMAN_ACK")
+    rep = verify_certificate(make_cert(entries), entries)
+    assert "UNKNOWN_EVENT_KIND" not in _unverified(rep)
+    assert rep.exit_code == EXIT_OK
+
+
+def test_each_unknown_type_is_named_once_however_often_it_occurs():
+    """A line repeated for every occurrence is how a warning becomes wallpaper."""
+    from deadman.verify_certificate import GUARDIAN_CORE_V1 as GC, unknown_event_kinds
+    rows = [{"event": "MYSTERY", "seq": i} for i in range(1, 40)]
+    rows += [{"event": "OTHER_MYSTERY", "seq": 40}, {"event": "ARMED", "seq": 41}]
+    assert unknown_event_kinds(rows, GC) == ["MYSTERY", "OTHER_MYSTERY"]
+
+
+def test_the_shipped_examples_mark_nothing():
+    """The examples are what a reader learns the shape from; a spurious line there teaches the
+    wrong shape."""
+    ex = Path(__file__).resolve().parents[1] / "deadman" / "examples" / "certificate"
+    entries = [json.loads(l) for l in
+               (ex / "ledger.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    for f in sorted(ex.glob("certificate*.json")):
+        cert = json.loads(f.read_text(encoding="utf-8"))
+        rep = verify_certificate(cert, entries)
+        assert "UNKNOWN_EVENT_KIND" not in _unverified(rep), f.name
+
+
+def test_the_kit_vocabulary_here_matches_the_kit_itself():
+    """`verify_certificate.py` imports nothing from the package on purpose - a recipient can run
+    the single file - so the kit's vocabulary is written out twice. This is what stops the copy
+    drifting from the original."""
+    from deadman.ledger import KINDS
+    from deadman.verify_certificate import KNOWN_EVENTS
+    assert KNOWN_EVENTS["deadman-kit-v1"] == frozenset(KINDS)
+
+
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
     Every attack here must be REFUSED - never exit 0 - and must name what it found.
