@@ -104,10 +104,40 @@ def canonical_json(obj: Mapping) -> bytes:
     return json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def _entry_hash(schema_version, seq, ts_utc, kind, actor, payload, prev_hash) -> str:
-    body = {"schema_version": schema_version, "seq": seq, "ts_utc": ts_utc, "kind": kind,
-            "actor": actor, "payload": payload, "prev_hash": prev_hash}
-    return hashlib.sha256(canonical_json(body)).hexdigest()
+#: Fields the entry hash does NOT cover, and the only two that may ever be on this list.
+#:
+#: `hash` is the digest itself. `sig` signs the digest, so it cannot also be inside it - that
+#: exclusion is forced by ordering, not chosen.
+#:
+#: THE LIST IS A BLOCKLIST ON PURPOSE. It used to be an allowlist of seven named fields, which
+#: meant a field outside those seven fell OUTSIDE THE HASH: it could be added, edited or deleted
+#: by anyone with disk access and verify() still returned OK. Measured, both through
+#: Ledger.verify() and through the certificate verifier, with the same value inside `payload` as
+#: the control - that one gave HASH_MISMATCH.
+#:
+#: The change is not "no names": `sig` forces two. What it changes is THE DEFAULT. A new field
+#: used to be born outside the signature; now it is born inside it. That is the whole point.
+#:
+#: Backward compatibility, measured rather than assumed: for every entry this kit writes, the
+#: blocklist body is byte-identical to the old seven-field body, because `Entry` is a frozen
+#: dataclass with exactly those fields plus the optional `sig`. No stored hash changes, no
+#: published anchor stops matching, and `schema_version` does not move - a verifier recomputes
+#: the same digest over the same bytes.
+HASH_EXCLUDED = frozenset({"hash", "sig"})
+
+#: What an entry must carry to be hashable at all. Kept explicit because the blocklist no longer
+#: raises KeyError on a missing field: it would just hash a smaller body and report a mismatch,
+#: which would report a MALFORMED entry as a TAMPERED one. Two different facts.
+ENTRY_REQUIRED = ("schema_version", "seq", "ts_utc", "kind", "actor", "payload", "prev_hash")
+
+
+def entry_body(entry: Mapping) -> dict:
+    """Exactly the bytes the hash covers: everything the entry carries, minus the two above."""
+    return {k: v for k, v in entry.items() if k not in HASH_EXCLUDED}
+
+
+def _entry_hash(entry: Mapping) -> str:
+    return hashlib.sha256(canonical_json(entry_body(entry))).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
@@ -258,7 +288,8 @@ class Ledger:
         seq = tip["last_seq"] + 1
         prev_hash = tip["last_hash"]
         ts = iso(self.clock.now_utc())
-        h = _entry_hash(SCHEMA_VERSION, seq, ts, kind, actor, payload, prev_hash)
+        h = _entry_hash({"schema_version": SCHEMA_VERSION, "seq": seq, "ts_utc": ts, "kind": kind,
+                         "actor": actor, "payload": payload, "prev_hash": prev_hash})
         sig = self.signer(h.encode("utf-8")).hex() if self.signer is not None else None
         entry = Entry(SCHEMA_VERSION, seq, ts, kind, actor, payload, prev_hash, h, sig)
         try:
@@ -444,9 +475,13 @@ class Ledger:
                                         detail=f"{seg_path.name} last entry {last.get('seq')} != anchor {expected_last[0]}")
             for idx in range(len(entries) - 1, -1, -1):
                 e = entries[idx]
+                missing = [f for f in ENTRY_REQUIRED if f not in e]
+                if missing:
+                    return VerifyReport(False, "MALFORMED_ENTRY", False, verified_from, checked,
+                                        segments, detail=f"seq {e.get('seq')} lacks {missing}")
                 try:
-                    h = _entry_hash(e["schema_version"], e["seq"], e["ts_utc"], e["kind"], e["actor"], e["payload"], e["prev_hash"])
-                except (KeyError, TypeError) as ex:
+                    h = _entry_hash(e)
+                except (TypeError, ValueError) as ex:
                     return VerifyReport(False, "MALFORMED_ENTRY", False, verified_from, checked, segments, detail=f"{ex}")
                 if h != e.get("hash"):
                     return VerifyReport(False, "HASH_MISMATCH", False, verified_from, checked, segments, detail=f"seq {e.get('seq')}")

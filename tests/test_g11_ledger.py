@@ -11,6 +11,11 @@ import pytest
 
 from deadman import Ledger, Anchor, GENESIS_HASH, FakeClock, Paths, ANCHOR_AFTER
 from deadman.errors import LedgerWriteError, LedgerIntegrityError
+from deadman.ledger import _entry_hash          # `entry_body` is imported inside the one
+                                                # test that needs it: a module-level import
+                                                # of a NEW name makes this whole file
+                                                # uncollectable against the old code, and
+                                                # then no control can run at all
 
 
 def _lines(p):
@@ -30,6 +35,80 @@ def test_first_entry_chains_from_genesis(paths, clock):
     rep = lg.verify()
     assert rep.ok and rep.chain_complete and rep.entries_checked == 2 and rep.code == "OK"
     assert "sig" not in _lines(paths.ledger_file)[0]
+
+
+# ---------------------------------------------------------------- DEF-1: what the hash covers
+
+def test_def1_a_field_outside_the_named_seven_used_to_ride_unsigned(paths, clock):
+    """The hashed body was an ALLOWLIST of seven names, so any OTHER top-level field fell outside
+    the hash: it could be added, edited or deleted by anyone with disk access and verify() still
+    returned OK. `sig` is the only field that may legitimately sit outside, and it is outside
+    because it signs the hash and cannot be inside it."""
+    lg = Ledger(paths, clock)
+    for i in range(3):
+        lg.append("USER_NOTE", {"i": i})
+    rows = _lines(paths.ledger_file)
+    rows[0]["acknowledgedBy"] = "somebody who never acknowledged anything"
+    _rewrite(paths.ledger_file, rows)
+
+    rep = lg.verify()
+    assert not rep.ok
+    assert rep.code == "HASH_MISMATCH"
+
+
+def test_def1_the_same_value_inside_payload_was_always_caught(paths, clock):
+    """CONTROL. The hole was never about the VALUE, only about WHERE it sat."""
+    lg = Ledger(paths, clock)
+    for i in range(3):
+        lg.append("USER_NOTE", {"i": i})
+    rows = _lines(paths.ledger_file)
+    rows[0]["payload"]["acknowledgedBy"] = "the same value, inside payload"
+    _rewrite(paths.ledger_file, rows)
+
+    rep = lg.verify()
+    assert not rep.ok and rep.code == "HASH_MISMATCH"
+
+
+def test_def1_a_malformed_entry_is_still_told_apart_from_a_tampered_one(paths, clock):
+    """CONTROL. A blocklist does not raise KeyError on a missing field - it would just hash a
+    smaller body and report a mismatch, reporting a MALFORMED entry as a TAMPERED one. Two
+    different facts, so the required-field check stays explicit."""
+    lg = Ledger(paths, clock)
+    for i in range(3):
+        lg.append("USER_NOTE", {"i": i})
+    rows = _lines(paths.ledger_file)
+    del rows[0]["actor"]
+    _rewrite(paths.ledger_file, rows)
+
+    rep = lg.verify()
+    assert not rep.ok
+    assert rep.code == "MALFORMED_ENTRY", "a short row is not a rewritten one"
+
+
+def test_def1_the_hashed_body_is_byte_identical_to_the_old_seven(paths, clock):
+    """BACKWARD COMPATIBILITY, pinned rather than argued.
+
+    The digest below was computed with the OLD rule - the seven names, spelled out here so this
+    test does not depend on the code it is checking. If the blocklist ever stops agreeing with it
+    for a well-formed entry, every stored hash and every anchor published to a third party stops
+    matching, and that must never happen quietly."""
+    body = {"schema_version": 1, "seq": 1, "ts_utc": "2026-01-01T00:00:00+00:00",
+            "kind": "USER_NOTE", "actor": "user", "payload": {"i": 0}, "prev_hash": "0" * 64}
+    assert _entry_hash(body) == "d74832a591791f4e5a77f66649dbf15e85cf1d9c345807635a10a941afd23a9b"
+
+    from deadman.ledger import entry_body
+    assert set(entry_body({**body, "hash": "H", "sig": "S"})) == set(body)
+
+
+def test_def1_a_signed_entry_still_verifies(paths, clock):
+    """CONTROL. `sig` must stay outside the body: it signs the hash, so it cannot be inside it.
+    If the blocklist ever swallowed it, every signed ledger in existence would stop verifying."""
+    lg = Ledger(paths, clock, signer=lambda b: b"SIG:" + b[:16],
+                verifier=lambda b, s: s == b"SIG:" + b[:16])
+    for i in range(3):
+        lg.append("USER_NOTE", {"i": i})
+    rep = lg.verify()
+    assert rep.ok and rep.code == "OK"
 
 
 def test_unknown_kind_rejected(paths, clock):
@@ -83,11 +162,10 @@ def test_tip_file_disagreeing_with_tail_is_integrity_error(paths, clock):
 
 def _recompute_chain(rows):
     """What an attacker with disk access does: rewrite and re-hash to the tip."""
-    from deadman.ledger import _entry_hash
     prev = GENESIS_HASH
     for r in rows:
         r["prev_hash"] = prev
-        r["hash"] = _entry_hash(r["schema_version"], r["seq"], r["ts_utc"], r["kind"], r["actor"], r["payload"], prev)
+        r["hash"] = _entry_hash(r)          # everything the row carries, minus hash and sig
         prev = r["hash"]
     return prev
 

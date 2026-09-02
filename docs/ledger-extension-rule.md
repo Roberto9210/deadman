@@ -150,6 +150,38 @@ el rechazo porque un verificador viejo declarando inválido un ledger legítimo 
 B ese caso se evita sólo mientras nadie viole una regla que hoy vive en un documento que **no
 existe** (§6). Es seguridad apoyada en un papel que falta.
 
+### APLICADO (2026-09-02)
+
+**Hecho mientras era gratis, que es el motivo que decidió el orden** (operador, 2-sep): hoy
+**ningún certificado lleva firma y ningún firmante está cableado** — medido de este lado (los
+cuatro ejemplos publicados salen sin `signature`, nada fuera de los tests pasa `signer=` a
+`Ledger`) y leído en el otro (`Certificate.cs:397`, commit `66dee69`: *«nothing wires a signer
+today, so this branch cannot run»*). En el momento en que alguien cablee un firmante, el mismo
+arreglo se vuelve una migración con certificados firmados de por medio.
+
+**Compatibilidad probada cruzando versiones de verdad**, no por aritmética: se armó un paquete
+espejo con el `ledger.py` del backup, se escribió un ledger **con el código viejo**, y se verificó
+**con el nuevo**.
+
+| | resultado |
+|---|---|
+| `verify()` del nuevo sobre bytes del viejo | `ok=True`, code `OK` |
+| hashes que el nuevo recomputa idénticos | **10/10** |
+| anclas publicadas que siguen coincidiendo | **5/5** |
+| ledger **firmado** por el viejo, verificado por el nuevo | `ok=True` |
+| campo top-level inyectado, hash sin tocar | **`HASH_MISMATCH`** (antes: `OK`) |
+| **CONTROL** entrada malformada (sin `actor`) | **`MALFORMED_ENTRY`**, no `HASH_MISMATCH` |
+
+Ese último control importa: una lista negra **no** levanta `KeyError` ante un campo faltante —
+hashearía un cuerpo más chico y reportaría un desajuste, o sea **reportaría una entrada MALFORMADA
+como una ADULTERADA**. Son dos hechos distintos, así que el chequeo de campos requeridos quedó
+explícito.
+
+Y el hash pinneado del test se calculó **con la regla vieja escrita a mano**, para que no dependa
+del código que comprueba: si la lista negra alguna vez deja de coincidir con él sobre una entrada
+bien formada, todo hash guardado y toda ancla publicada dejan de coincidir, y eso no puede pasar en
+silencio.
+
 ### — RULING — Opción A, aprobada
 
 **El cuerpo hasheado pasa a ser lista negra de dos nombres: `hash` y `sig`.**
@@ -1080,7 +1112,7 @@ re-emisión, ni migración.
 |---|---|---|
 | un campo a `payload` de un evento existente | **sí** | las cuatro obligaciones de §5.2 |
 | un campo top-level en `guardian-core-v1` | **sí, pero no** | queda hasheado, pero sin ganancia sobre `payload` |
-| un campo top-level en `deadman-kit-v1` | **NO hasta que DEF-1/A esté implementado** | hoy quedaría fuera del hash. Con la opción A ya aplicada pasa a **sí, con `schema_version: 2`** y despacho por versión |
+| un campo top-level en `deadman-kit-v1` | **SÍ** (DEF-1/A aplicado 2026-09-02) | hoy quedaría fuera del hash. Con la opción A ya aplicada pasa a **sí, con `schema_version: 2`** y despacho por versión |
 | un tipo de evento nuevo | **sí** | §5.2, §5.4 y §5.5 |
 | un campo nuevo al certificado | **sí** | entra en `certHash` y en la regla 5; nunca un valor de relleno (§5.6) |
 
@@ -1894,7 +1926,7 @@ corregir los blobs, o corregir la frase.
 5. ~~**DEF-4**~~ — **HECHO (2026-09-02)**: la severidad sigue al daño y ya no depende de que `dayKey` esté. Era: con
    `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
    limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.
-5. **DEF-1**, opción A — lista negra `{hash, sig}` en `_kit_body` y `_entry_hash`, con el test de
+5. ~~**DEF-1**~~ — **HECHO (2026-09-02)**: lista negra `{hash, sig}`; un campo nuevo nace dentro de la firma. Era: con el test de
    inyección top-level como control.
 6. La exclusión `HUMAN_*` en `recompute_claims`, con D2 como control.
 7. El marcado `UNKNOWN_EVENT_KIND` como `cannot_verify`.

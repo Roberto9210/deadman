@@ -120,9 +120,11 @@ def _guardian_body(e: Mapping[str, Any]) -> dict:
 
 
 def _kit_body(e: Mapping[str, Any]) -> dict:
-    # deadman-kit hashes seven named fields (ledger.py::_entry_hash). `sig` is written to
-    # disk but is NOT part of the hashed body, so "drop the hash field" would be wrong here.
-    return {k: e[k] for k in ("schema_version", "seq", "ts_utc", "kind", "actor", "payload", "prev_hash")}
+    # deadman-kit hashes everything except `hash` and `sig` (ledger.py::HASH_EXCLUDED). It used
+    # to name seven fields, which left any OTHER top-level field outside the hash entirely -
+    # measured, a field injected there survived verification untouched. `sig` stays out because
+    # it signs the hash and cannot be inside it; that exclusion is forced by ordering, not chosen.
+    return {k: v for k, v in e.items() if k not in ("hash", "sig")}
 
 
 GUARDIAN_CORE_V1 = Dialect(
