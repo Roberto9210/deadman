@@ -52,6 +52,10 @@ def _sha(p: Path) -> str:
 def run_pytest(tests: str, selector: str) -> str:
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # Explicit, though `cwd=ROOT` already puts the repo first on the subprocess's path (measured).
+    # Relying on that would be relying on an accident: it is the same accident that made a broken
+    # subprocess import pass locally and go red on all nine CI cells (commit 2f3109a).
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     cmd = [sys.executable, "-m", "pytest", tests, "-q", "-p", "no:cacheprovider"]
     if selector:
         cmd += ["-k", selector]

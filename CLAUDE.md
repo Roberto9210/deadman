@@ -198,6 +198,52 @@ ser una historia y pasa a ser una herramienta.**
 un tipo que no puede decir que no sabe, son **la misma cosa** — un campo prometiendo una capacidad
 que no tiene. El nombre promete saber *qué*; el tipo promete poder decir *cuánto sabe*.
 
+## Todo arreglo cierra ejecutando el control, no leyéndolo
+
+**El control no se interpreta: se ejecuta y devuelve un veredicto de tres estados.** Es lo que
+falló dos veces leyéndolo con los ojos, y es lo que ya no puede fallar igual.
+
+```
+python scripts/check_against_old.py backups/<tema> -k <selector> --expect <N>
+```
+
+Un arreglo no está cerrado hasta que ese comando dice `CONTROL HOLDS`.
+
+### Y PYTHONPATH NO ALCANZA PARA PROBAR OTRA VERSIÓN
+
+**Ponerlo y creer que se está probando otra versión es no estar probándola — y no enterarse.** La
+prueba corre, pasa, y midió el paquete instalado.
+
+Este paquete está instalado **editable**, y un editable pone un *finder* en `sys.meta_path` que
+resuelve el nombre **antes** de que se consulte `sys.path`. Medido, no supuesto: con `PYTHONPATH`
+apuntando a una copia, `deadman.__file__` seguía siendo el del repo. Por eso
+`check_against_old.py` **intercambia los archivos en el lugar** y verifica el restore por `sha256`,
+en vez de montar un espejo.
+
+Es la familia de toda la semana, ahora en el herramental: **un mecanismo que hace que una
+comprobación NO CORRA mientras se ve exactamente igual que si hubiera corrido.**
+
+**Dos modos de enmascaramiento, y sólo uno es inocuo:**
+
+| modo | qué tapa | ¿vivo? |
+|---|---|---|
+| **«¿cuál versión?»** | `PYTHONPATH` no puede sombrear el finder | **inocuo en uso normal** — en un editable el destino y el árbol son el mismo archivo, así que sólo muerde cuando querés una versión *distinta* a propósito |
+| **«¿es alcanzable siquiera?»** | el paquete importa localmente cuando desde un checkout limpio no importaría | **era real y está cerrado** (ver abajo) |
+
+**El caso real, y corrige cómo lo conté yo:** en `2f3109a`, CI se puso rojo en **las nueve** celdas
+de la matriz con `ModuleNotFoundError: No module named 'deadman'`. Causa: `python ruta/script.py`
+pone en `sys.path` el directorio del SCRIPT, no el cwd, así que un subproceso no podía importar el
+paquete desde un checkout pelado. **Pasaba localmente sólo por el editable install.**
+
+> **El editable no tapó el fallo ANTE CI: CI es quien lo encontró. Lo tapó LOCALMENTE.** Dije «tapó
+> un fallo de CI», que se lee al revés y le echa la culpa al medidor bueno. El entorno local era el
+> que mentía.
+
+Cerrado y verificado **donde falla y no donde pasa**: un virtualenv limpio con sólo `pytest` y
+`cryptography`, **sin el paquete instalado**, corre la suite entera en verde. Y todo subproceso que
+necesita importar `deadman` pone `PYTHONPATH` explícito — incluido el de este comando, aunque
+`cwd=ROOT` ya alcanzaría: apoyarse en eso sería apoyarse en el mismo accidente.
+
 ## El control contra código viejo lo corre un comando, no los ojos
 
 ```
