@@ -160,6 +160,31 @@ aparece en dominios que no se hablan, lo cual vale. Lo que no queda probado: que
 distinto lo hubiera visto. Un tercer camino independiente **de observador** — alguien que no sea
 esta casa encontrando la misma forma — es lo que cerraría eso, y no lo tenemos.
 
+## Un campo cuyo tipo no puede expresar «no sé» lo va a expresar como «no»
+
+**Y «no» es la respuesta que acusa.**
+
+Antes de elegir un booleano para un hecho **observado**, preguntar qué pasa cuando el observador
+**no pudo mirar**. Si la respuesta es «sale `false`», el tipo está mal elegido: el tercer estado no
+desaparece por no tener casillero — se disfraza del peor de los dos que hay, y el peor es siempre
+el que perjudica a la persona de la que el documento habla.
+
+**Tres instancias el mismo día (2026-09-01), en el mismo verificador:**
+
+| la ausencia | lo que publicaba |
+|---|---|
+| el archivo entregado no es el que el certificado declara | `CONTRADICTED` |
+| el ledger llegó cortado por un corte de luz | `CONTRADICTED` + «se pasó del límite» |
+| el guardián no pudo ver la cuenta | `limitRespected: false` |
+
+Las tres veces **la herramienta tenía la información para saber que no sabía**, y las tres eligió
+el valor que acusa. No es descuido repetido: es lo que pasa cuando el tipo no tiene lugar para el
+tercer estado.
+
+**Hace pareja con la regla del nombre:** un nombre que afirma más de lo que su código comprobó, y
+un tipo que no puede decir que no sabe, son **la misma cosa** — un campo prometiendo una capacidad
+que no tiene. El nombre promete saber *qué*; el tipo promete poder decir *cuánto sabe*.
+
 ## Un control que no dispara invalida la SECCIÓN, no el HALLAZGO
 
 **Es la diferencia entre una medición que se DESCARTA y una que se REHACE**, y sin la distinción

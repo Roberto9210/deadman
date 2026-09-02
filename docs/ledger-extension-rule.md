@@ -1067,6 +1067,24 @@ versión nueva para no fallar, que es justo el costo que la regla existe para ev
 3. **Tiene un lector nombrado.** Un campo que nadie consume es decorativo por la regla 5. Antes de
    escribirlo hay que decir **quién** lo lee.
 4. **Se prueba con su control.** Un caso que pasa y un caso mutado que falla.
+5. **SU TIPO PUEDE EXPRESAR «NO SÉ».**
+
+   > **Un campo cuyo tipo no puede expresar «no sé» lo va a expresar como «no», y «no» es la
+   > respuesta que acusa.**
+
+   Antes de elegir un booleano para un hecho **observado**, preguntar qué pasa cuando el
+   observador **no pudo mirar**. Si la respuesta es «sale `false`», el tipo está mal elegido: el
+   tercer estado no desaparece por no tener casillero, se disfraza del peor de los dos que hay.
+
+   No es una regla sobre este verificador. Es sobre la **forma** de cualquier campo, y va acá
+   —entre las obligaciones de todo campo nuevo— y no entre los defectos, porque su valor es
+   **prevenir el próximo**, no explicar los tres que ya pasaron: §6bis, DEF-6 y DEF-7 son la misma
+   forma con tres disfraces. Las tres veces la herramienta tenía la información para saber que no
+   sabía, y eligió el valor que acusa.
+
+   **Hace pareja con la regla del NOMBRE** (DEF-2: `triggerEvent` prometía una causa y entregaba
+   adyacencia). Nombre y tipo son las dos formas en que **un campo promete una capacidad que no
+   tiene** — el nombre promete saber *qué*, el tipo promete poder decir *cuánto sabe*.
 
 ## 5.3 — RULING — Verificador viejo ante algo que no conoce
 

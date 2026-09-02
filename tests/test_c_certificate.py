@@ -989,6 +989,97 @@ def test_def5_a_bad_signature_is_still_caught(tmp_path):
     assert "SIGNATURE_INVALID" in codes(rep)
 
 
+# ================================================================== DEF-7
+
+def _blind_day():
+    """A clean session in which the guardian COULD NOT SEE: a fail-closed episode with no
+    FAIL_CLOSED_CLEARED, and zero LIMIT_BREACHED. The condition a fresh install starts in."""
+    rows = [r for r in gledger(DISCONNECT_DAY) if r.get("event") != "FAIL_CLOSED_CLEARED"]
+    prev, out = "genesis", []
+    for r in rows:
+        r = dict(r)
+        r["seq"] = len(out) + 1
+        r["prev"] = prev
+        r.pop("hash", None)
+        r["hash"] = GUARDIAN_CORE_V1.hash_of(r)
+        prev = r["hash"]
+        out.append(r)
+    return out
+
+
+def test_def7_a_blind_guardian_is_not_a_trader_who_breached():
+    """`limitRespected: false` was published both for going past the limit and for the guardian
+    not being able to look. Opposite facts about the person holding the document, collapsed onto
+    the accusing side - and with ZERO LIMIT_BREACHED recorded."""
+    entries = _blind_day()
+    claims = recompute_claims(entries, GUARDIAN_CORE_V1, 1, len(entries), True)
+    assert claims["lockoutsTriggered"] == 0, "no breach was recorded; the guardian went blind"
+    assert claims["limitStatus"] == "undetermined"
+    assert recompute_claims(gledger(BREACH_DAY), GUARDIAN_CORE_V1, 1, 99,
+                            True)["limitStatus"] == "breached"     # the status can say otherwise
+
+    for said in (True, False):
+        cert = make_cert(entries, overrides={"claims.limitRespected": said})
+        rep = verify_certificate(cert, entries)
+        assert rep.exit_code != EXIT_CONTRADICTED, said
+        charged = " ".join(f.detail for f in rep.contradictions)
+        assert "limitRespected" not in charged, said
+        assert "LIMIT_UNDETERMINED" in {f.code for f in rep.unverified}
+
+
+def test_def7_a_real_breach_is_still_caught():
+    """CONTROL. Teaching it to say *I do not know* must not teach it to say *fine*.
+
+    Deliberately free of any assertion about `limitStatus`: a control for PRESERVED behaviour has
+    to pass against the old code too, or it is not measuring preservation."""
+    entries = gledger(BREACH_DAY)
+    honest = make_cert(entries)
+    assert verify_certificate(honest, entries).exit_code == EXIT_OK
+
+    liar = make_cert(entries, overrides={"claims.limitRespected": True})
+    rep = verify_certificate(liar, entries)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CLAIM_MISMATCH" in codes(rep)
+
+
+def test_def7_a_clean_day_is_still_respected():
+    """CONTROL in the other direction: undetermined must not swallow the ordinary case. Also
+    free of `limitStatus`, for the same reason."""
+    entries = gledger(QUIET_DAY)
+    assert verify_certificate(make_cert(entries), entries).exit_code == EXIT_OK
+
+    wrong = make_cert(entries, overrides={"claims.limitRespected": False})
+    assert verify_certificate(wrong, entries).exit_code == EXIT_CONTRADICTED
+
+
+def test_def7_the_certificate_field_keeps_its_boolean_shape():
+    """Retyping a field of the CERTIFICATE is the emitter's side of the contract (§5.12). The
+    three states are INTERNAL; what changed on this side is the severity, not the document."""
+    entries = gledger(QUIET_DAY)
+    claims = recompute_claims(entries, GUARDIAN_CORE_V1, 1, len(entries), True)
+    assert claims["limitRespected"] is True
+    assert isinstance(claims["limitRespected"], bool)
+
+
+def test_def7_the_three_state_spelling_is_accepted_when_the_emitter_ships_it():
+    entries = gledger(BREACH_DAY)
+    cert = make_cert(entries, overrides={"claims.limitRespected": "breached"})
+    assert verify_certificate(cert, entries).exit_code == EXIT_OK
+
+    wrong = make_cert(entries, overrides={"claims.limitRespected": "respected"})
+    assert verify_certificate(wrong, entries).exit_code == EXIT_CONTRADICTED
+
+
+def test_def7_an_integer_is_no_longer_quietly_accepted_as_true():
+    """`1 == True` in Python, so an integer used to pass a claim check by accident. An accidental
+    tolerance is an acceptance nobody decided, and the day it matters it reads as a choice."""
+    entries = gledger(QUIET_DAY)
+    cert = make_cert(entries, overrides={"claims.limitRespected": 1})
+    rep = verify_certificate(cert, entries)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "neither a boolean nor one of" in " ".join(f.detail for f in rep.contradictions)
+
+
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
     Every attack here must be REFUSED - never exit 0 - and must name what it found.

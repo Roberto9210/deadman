@@ -523,6 +523,8 @@ class CertReport:
         add(f"  anchors       {self.anchors_checked} checked"
             + (f", covered up to seq {self.covered_up_to_seq}" if self.covered_up_to_seq else ""))
         add(f"  signature     {self.signature_status}")
+        if self.recomputed.get("limitStatus") == "undetermined":
+            add("  limit         UNDETERMINED - a fail-closed episode is still open with no\n                              breach recorded, so the guardian could not see. This is NOT a\n                              statement that the trader went past a limit")
         add("")
         add(f"  DECLARED      {self.declared_level}")
         add(f"  REACHED       {self.reached_level or 'none'}")
@@ -1086,9 +1088,29 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
     clock = {"CLOCK_ANOMALY": names.count("CLOCK_ANOMALY"),
              "CLOCK_SUSPECT": names.count("CLOCK_SUSPECT")}
 
-    limit_respected = (lockouts == 0
-                       and not any(e["open"] for e in episodes)
-                       and chain_ok)
+    # THREE STATES, because reality has three and a boolean has two.
+    #
+    # `limitRespected: false` was published both when the trader went past their limit and when
+    # the guardian COULD NOT SEE - an episode still open at the end of the range, with zero
+    # LIMIT_BREACHED. Those are opposite facts about the person holding the document, and the
+    # collapse always fell on the accusing side. Measured: an episode missing its
+    # FAIL_CLOSED_CLEARED gives lockoutsTriggered=0 and limitRespected=False.
+    #
+    # A CONNECTION THIS MACHINE MAKES BY DEFAULT: the platform does not connect on startup unless
+    # told to, so a fresh install sits in exactly the state that produces an open episode. This is
+    # not an edge; it is the first day of every new user.
+    #
+    # `limitStatus` is INTERNAL and `limitRespected` keeps its boolean value unchanged: renaming or
+    # retyping a field of the CERTIFICATE is the emitter's side of the contract (§5.12). What
+    # changes here is the SEVERITY the verifier assigns, which is where the accusation lived.
+    open_episode = any(e["open"] for e in episodes)
+    if lockouts > 0:
+        limit_status = "breached"
+    elif open_episode or not chain_ok:
+        limit_status = "undetermined"
+    else:
+        limit_status = "respected"
+    limit_respected = (lockouts == 0 and not open_episode and chain_ok)
 
     return {
         "lockoutsTriggered": lockouts,
@@ -1097,6 +1119,7 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
         "failClosedEpisodes": episodes,
         "clockAnomalies": {"byType": clock},
         "limitRespected": limit_respected,
+        "limitStatus": limit_status,
     }
 
 
@@ -1201,6 +1224,58 @@ def _check_signature(cert: Mapping[str, Any], pubkey_path: Optional[Path],
 # --------------------------------------------------------------------------------------
 # The verifier
 # --------------------------------------------------------------------------------------
+
+#: What a certificate is allowed to say about the limit. The boolean is what every emitter
+#: writes today; the three strings are what it should say once it can. `True` is accepted as an
+#: EXACT boolean, not as anything equal to it - `1 == True` in Python, and an integer slipping
+#: through a claim check would be a tolerance nobody chose. Closed on purpose (§DEF-7).
+_LIMIT_LEGACY = {True: "respected", False: "boolean-false"}
+_LIMIT_STATES = ("respected", "breached", "undetermined")
+
+
+def _compare_limit(rep: "CertReport", mine: str, claimed: Mapping[str, Any], disagree) -> None:
+    """`limitRespected`, judged by what the events can actually support.
+
+    THE RULE THAT MATTERS: when the recomputed state is `undetermined`, NOTHING here is a
+    contradiction. The verifier does not know whether the limit was respected, and a tool that
+    does not know must not accuse - least of all in a document whose whole purpose is to be handed
+    to a third party who will act on it.
+
+    A legacy `false` against an `undetermined` is the ORIGIN DEFECT, not a lie: that certificate
+    said the only thing its type allowed it to say."""
+    if "limitRespected" not in claimed:
+        rep.cannot_verify("CLAIM_ABSENT",
+                          f"the certificate does not state `limitRespected`; recomputed {mine!r}")
+        return
+    theirs = claimed["limitRespected"]
+
+    if isinstance(theirs, str) and theirs in _LIMIT_STATES:
+        said = theirs
+    elif theirs is True or theirs is False:            # exact identity: 1 is not True here
+        said = _LIMIT_LEGACY[theirs]
+    else:
+        rep.contradict("CLAIM_MISMATCH",
+                       f"`limitRespected` is {theirs!r}, which is neither a boolean nor one of "
+                       f"{list(_LIMIT_STATES)}")
+        return
+
+    if mine == "undetermined":
+        rep.cannot_verify(
+            "LIMIT_UNDETERMINED",
+            f"the certificate says `limitRespected` {theirs!r}, and the events cannot settle it: "
+            f"a fail-closed episode is still open at the end of the range with no LIMIT_BREACHED, "
+            f"so the guardian could not see the account rather than the trader going past a "
+            f"limit. Not a finding against the holder"
+            + ("" if said != "boolean-false" else
+               " - and a boolean `false` here is the only thing that field could say"))
+        return
+
+    if said == "boolean-false":                        # legacy false == breached, when settled
+        said = "breached"
+    if said != mine:
+        disagree("CLAIM_MISMATCH",
+                 f"`limitRespected`: certificate says {theirs!r}, the events say {mine!r}")
+
 
 def verify_certificate(cert: Mapping[str, Any],
                        ledger_entries: Sequence[Mapping[str, Any]],
@@ -1328,7 +1403,7 @@ def verify_certificate(cert: Mapping[str, Any],
             disagree("CLAIM_MISMATCH",
                      f"`{key}`: certificate says {theirs!r}, the events say {mine!r}")
 
-    compare("limitRespected", rep.recomputed["limitRespected"], claimed.get("limitRespected"))
+    _compare_limit(rep, rep.recomputed["limitStatus"], claimed, disagree)
     compare("lockoutsTriggered", rep.recomputed["lockoutsTriggered"], claimed.get("lockoutsTriggered"))
     compare("ordersRejectedWhileLocked", rep.recomputed["ordersRejectedWhileLocked"],
             claimed.get("ordersRejectedWhileLocked"))
