@@ -176,14 +176,52 @@ el que perjudica a la persona de la que el documento habla.
 | el archivo entregado no es el que el certificado declara | `CONTRADICTED` |
 | el ledger llegó cortado por un corte de luz | `CONTRADICTED` + «se pasó del límite» |
 | el guardián no pudo ver la cuenta | `limitRespected: false` |
+| *(cuarta, **PREVENIDA**)* una entrada a la que le falta un campo | habría dado `HASH_MISMATCH` |
 
-Las tres veces **la herramienta tenía la información para saber que no sabía**, y las tres eligió
-el valor que acusa. No es descuido repetido: es lo que pasa cuando el tipo no tiene lugar para el
-tercer estado.
+Las tres primeras **la herramienta tenía la información para saber que no sabía**, y las tres
+eligió el valor que acusa. No es descuido repetido: es lo que pasa cuando el tipo no tiene lugar
+para el tercer estado.
+
+**La cuarta es la única distinta, y es lo que prueba que la regla sirve.** Al pasar el cuerpo
+hasheado a lista negra, un campo faltante ya no levanta `KeyError`: hashearía un cuerpo más chico y
+reportaría un desajuste — o sea **reportaría una entrada MALFORMADA como una ADULTERADA**, que es
+un archivo roto publicado como una persona manipulando. Se vio **antes de escribirlo** y el chequeo
+de campos requeridos quedó explícito.
+
+> **Sin ese control habría cambiado un agujero por una confusión.**
+
+Las tres primeras son hallazgos; la cuarta es prevención. **Una regla que sólo explica defectos
+pasados no se distingue de una descripción; la primera vez que atrapa uno antes de existir, deja de
+ser una historia y pasa a ser una herramienta.**
 
 **Hace pareja con la regla del nombre:** un nombre que afirma más de lo que su código comprobó, y
 un tipo que no puede decir que no sabe, son **la misma cosa** — un campo prometiendo una capacidad
 que no tiene. El nombre promete saber *qué*; el tipo promete poder decir *cuánto sabe*.
+
+## El control contra código viejo lo corre un comando, no los ojos
+
+```
+python scripts/check_against_old.py backups/<tema> -k <selector> --expect <N>
+```
+
+**Tres resultados, no dos** — con los códigos de salida que esta casa ya usa:
+
+| | |
+|---|---|
+| **0** | se colectó y fallaron exactamente los N esperados: **el control vale** |
+| **1** | se colectó y pasó otra cosa: **el control dice algo distinto de lo que creías** |
+| **2** | **NO SE COLECTÓ**: el control no corrió, y eso NO es lo mismo que haber pasado |
+
+**El tercero es el que existe por haber mordido dos veces el mismo día.** Un `import` a nivel de
+módulo de un nombre que el código viejo no tiene vuelve **incolectable el archivo entero**: pytest
+no falla nada, y la salida se lee como una corrida que ocurrió. **Cero fallos no significaba que el
+control aguantó — significaba que no se midió nada.** Es §5.8 escalón 4 apuntado al propio banco de
+pruebas.
+
+La regla que lo evita sigue valiendo — *un control contra código viejo no puede depender de que el
+código nuevo se importe* — pero **se escribió después de romperla dos veces, y la segunda el mismo
+día que la primera. Una regla que se rompe el día que se escribe se mecaniza, no se reescribe
+mejor.**
 
 ## Un control que no dispara invalida la SECCIÓN, no el HALLAZGO
 
