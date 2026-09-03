@@ -849,7 +849,8 @@ def _check_range_covers_its_day(cert: Mapping[str, Any], entries: Sequence[Mappi
 #:   MARKING says *I verified what I could and there is content I do not understand*, which is the
 #:   only honest one and the same shape as everything else here: the absence speaks.
 #:
-#: Declared as a list, so §5.7 applies: A LEXICAL LIST IS TESTED AGAINST THE REAL VOCABULARY. The
+#: Declared as a list, so the house rule for lexical lists applies: A LIST OF NAMES IS TESTED
+#: AGAINST THE REAL VOCABULARY IT COULD CATCH, never against the cases someone imagined. The
 #: sweep is in tests/test_c_certificate.py and asserts this fires on nothing a real ledger holds.
 #: `HUMAN_*` is known BY PREFIX rather than by name - the point of the prefix is that the verifier
 #: knows exactly what to do with those without being told each one (nothing: they are testimony
@@ -930,9 +931,9 @@ def recompute_continuity(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
                          from_seq: int, to_seq: int) -> dict:
     """How much of the armed day the guardian's own clock could vouch for.
 
-    SPEC section 17.2 states the gap plainly: across a process restart the seal is no longer
-    measured on a monotonic counter, and falls back to the wall clock. That cannot be closed
-    without a time source off the machine, which v1 does not have. It can be made NOISY - a
+    guardian SPEC section 17.2 states the gap plainly: across a process restart the seal is no
+    longer measured on a monotonic counter, and falls back to the wall clock. That cannot be
+    closed without a time source off the machine, which v1 does not have. It can be made NOISY - a
     legitimate restart lasts seconds, and a long gap is the shape the attack needs.
 
     Two rules govern every name and every sentence produced here:
@@ -1164,7 +1165,7 @@ def find_backwards_timestamps(entries: Sequence[Mapping[str, Any]], dialect: Dia
 
 def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
                      from_seq: int, to_seq: int, chain_ok: bool) -> dict:
-    """Every claim of SPEC §2c/§A.2, counted from the events and nothing else."""
+    """Every claim of CERT_SPEC §A.2, counted from the events and nothing else."""
     rows = _events_in_range(entries, dialect, from_seq, to_seq)
     ev = dialect.f_event
     names = [r.get(ev) for r in rows]
@@ -1237,7 +1238,8 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
     # not an edge; it is the first day of every new user.
     #
     # `limitStatus` is INTERNAL and `limitRespected` keeps its boolean value unchanged: renaming or
-    # retyping a field of the CERTIFICATE is the emitter's side of the contract (§5.12). What
+    # retyping a field of the CERTIFICATE is the emitter's side of the contract: this verifier
+    # judges what it is handed and does not get to change the schema of the thing it judges. What
     # changes here is the SEVERITY the verifier assigns, which is where the accusation lived.
     open_episode = any(e["open"] for e in episodes)
     if lockouts > 0:
@@ -1271,9 +1273,10 @@ def recompute_claims(entries: Sequence[Mapping[str, Any]], dialect: Dialect,
 def _cert_preimage(cert: Mapping[str, Any]) -> bytes:
     """certHash covers the document without `certHash` and without `signature`.
 
-    SPEC §4 says "sha256 of the document without this field". Excluding `signature` too is
+    CERT_SPEC §4 says "sha256 of the document without this field". Excluding `signature` too is
     forced by ordering: the signature is produced over the hash, so it cannot also be inside
-    it. Flagged in CERT_STEP1.md as an assumption for the emitter to match.
+    it. THE EMITTER MUST EXCLUDE THE SAME TWO KEYS IN THE SAME ORDER, or every certificate it
+    issues fails here - that is the assumption, and it is stated rather than pointed at.
     """
     return canonical_json({k: v for k, v in cert.items() if k not in ("certHash", "signature")})
 
@@ -1775,7 +1778,7 @@ def verify_series(certs: Sequence[Mapping[str, Any]]) -> CertReport:
 
 def _days_between(a: str, b: str) -> list[str]:
     """Calendar days strictly between two YYYY-MM-DD keys. Weekends are NOT skipped: a
-    weekend day that is not certified is a gap and must be declared as one (§2b)."""
+    weekend day that is not certified is a gap and must be declared as one (guarantee C13)."""
     from datetime import date, timedelta
     try:
         d0 = date.fromisoformat(a)

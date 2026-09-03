@@ -36,8 +36,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "docs" / "CERT_SPEC.md"
 
@@ -166,13 +164,6 @@ def test_the_spec_itself_is_readable():
 
 # ---------------------------------------------------------------- the sweep
 
-@pytest.mark.xfail(strict=True, reason=(
-    "RED ON PURPOSE, 2026-09-02. Six citations in the shipped file land nowhere, and the fix is a "
-    "CODE change in verify_certificate.py, which means a new release - a decision that is not this "
-    "session's to take. Committed red rather than after the fix so the log shows the defect "
-    "existed: the order of the log is the only thing a third party can read without trusting us. "
-    "strict=True, so the day the citations are fixed this test XPASSes and FAILS, forcing the mark "
-    "off. The commit that fixes the citations is the commit that removes it."))
 def test_every_local_citation_lands_on_a_section_that_exists():
     """The point of the whole file."""
     have = spec_sections()
@@ -203,10 +194,6 @@ def test_the_declared_version_matches_the_document():
         assert v in head, f"the code cites CERT_SPEC v{v} and the document titles itself {head!r}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "RED ON PURPOSE, 2026-09-02. `CERT_STEP1.md` is named in the shipped file and exists in no "
-    "repository. The fix has to happen in the file that travels, so it is a code change and a new "
-    "release. Same strict mark, same removal condition."))
 def test_no_shipped_citation_points_at_a_file_that_does_not_exist():
     """`CERT_STEP1.md` was a working document that never got versioned. Declaring it dead in some
     other document does not help the person who installed the package: the name travels inside the
@@ -229,14 +216,6 @@ def test_every_declared_form_is_still_recognised():
             f"{sample!r} classified as {found[0][0]}, declared as {expected}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "RED ON PURPOSE, 2026-09-03, and red only until the citation commit that follows it. The "
-    "examples README ships inside the wheel and links to `../../docs/verify-certificate.md`, which "
-    "resolves in a git clone and resolves to nothing in an installed package because `docs/` is "
-    "not packaged. Committed red first because this one was MISSED by the previous sweep and "
-    "counted by hand afterwards: the log should show that the extractor could not see it before "
-    "it shows that the link was fixed. strict=True, so the fix removes this mark or the suite "
-    "fails."))
 def test_no_shipped_markdown_link_dangles_where_the_reader_will_open_it():
     """A relative link in a file that ships must resolve FROM THAT FILE'S OWN DIRECTORY.
 

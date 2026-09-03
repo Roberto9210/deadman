@@ -22,8 +22,9 @@ python -m deadman.verify_certificate certificate.json ledger.jsonl
 | `certificate-truncated.json` | a range declared short so the inconvenient part of the day falls outside it. Contains no false statement | `RANGE_TRUNCATED`, exit **1** |
 | `certificate-unknown-issuer.json` | what the emitter writes when it cannot determine its own version or build hash: it **omits** both fields rather than defaulting them | `VERIFIED at L1`, exit **0** |
 
-The last one exists because [CERT_SPEC rule 1](../../docs/verify-certificate.md) — *unknown is
-omitted, never defaulted* — is otherwise visible only in prose. A reader learns the shape from the
+The last one exists because CERT_SPEC rule 1 — *a value the emitter could not determine is
+omitted or written as an explicit `null`, never filled with a placeholder* — is otherwise visible
+only in prose. A reader learns the shape from the
 examples, so the examples have to contain the shape. They are deliberately kept in separate files:
 the truncated-range example teaches one thing and does not get other lessons stapled to it.
 
