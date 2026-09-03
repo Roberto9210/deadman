@@ -16,6 +16,20 @@ THREE OUTCOMES, because two would force a lie in one direction or the other:
     EXTERNAL  the target belongs to another repo      -> not ours to resolve, counted and named
     (nothing else: a citation the extractor cannot classify makes the test fail rather than
      being quietly dropped, which is how a sweep reports success over what it did not read)
+
+WHAT A GREEN HERE MEANS - declared, because it is narrower than it sounds.
+
+The first version of this file found six broken citations and was taken to have swept the shipped
+surface. It had not. A SEVENTH, of the same class, sat in the other shipped file as a RELATIVE
+MARKDOWN LINK, and the pattern did not match that shape - so the sweep reported that file clean.
+A green would have read as "no broken citations" when it only ever meant "none OF THE FORMS
+SOMEBODY THOUGHT TO LOOK FOR". That is the very defect this file exists to catch, one level up:
+an artefact making a claim wider than what it measured.
+
+The forms covered are listed in COVERED_FORMS, each with a sample the tests assert is still
+classified - remove a branch from the pattern and its sample stops matching and the suite goes
+red, so the list cannot drift into decoration. What is NOT covered is listed in NOT_COVERED, and
+that list is part of reading the green.
 """
 from __future__ import annotations
 
@@ -47,6 +61,36 @@ CITATION = re.compile(
     r"|§\s?(?P<sig>A\.\d+|\d+[a-z]?(?:\.\d+)*)"
     r"|guarantee\s+(?P<guar>C\d+)"
     r"|\b(?P<bare_guar>C(?:9|1[0-9]))\b"
+)
+
+
+#: A markdown link whose target is a path, in a file that ships. Added 2026-09-03 after the sweep
+#: reported the examples README clean while it carried a link to `../../docs/verify-certificate.md`
+#: - a path that resolves in the repository and resolves to NOTHING inside an installed wheel,
+#: because `docs/` is not packaged. The resolution below is deliberately done from the file's own
+#: directory, which is the only place the reader of a shipped file can resolve it from.
+MD_LINK = re.compile(r"\[[^\]]*\]\((?P<target>[^)#][^)]*)\)")
+
+#: The reach of this sweep, stated. Each entry carries a sample that the tests re-classify, so the
+#: declaration is load-bearing rather than a comment that outlives the code it describes.
+COVERED_FORMS = (
+    ("EXTERNAL", "as specified in guardian SPEC section 17.2, the seal"),
+    ("RULE", "CERT_SPEC rule 5: a field that looks like evidence"),
+    ("VERSION", "certificate (CERT_SPEC v0.2)."),
+    ("DEAD_FILE", "flagged in CERT_STEP1.md as an assumption"),
+    ("LOCAL", "counted from the events (SPEC section 4.3)"),
+    ("LOCAL", "the layer actually reached (SPEC §A.3)"),
+    ("LOCAL", "recomputed over the range (§A.2)"),
+    ("GUARANTEE", "the limitations appear verbatim (guarantee C10)"),
+)
+
+#: NOT covered. Read this before reading a green.
+NOT_COVERED = (
+    "prose that describes a rule without naming it ('the verifier refuses a reworded limitation')",
+    "citations inside files that do not ship - docs/, tests/, scripts/ are repository concerns",
+    "a link whose target exists but whose LABEL names a different document (measured by eye "
+    "today: the examples README labels a link 'CERT_SPEC rule 1' and points at another file)",
+    "anchors within a target file (#fragments are stripped before resolution)",
 )
 
 
@@ -171,6 +215,48 @@ def test_no_shipped_citation_points_at_a_file_that_does_not_exist():
     assert not dead, (
         "these name a file that exists in no repository, and they ship:\n  "
         + "\n  ".join(f"{n}: {r!r}" for n, r in dead))
+
+
+# ---------------------------------------------------------------- the reach of the sweep, asserted
+
+def test_every_declared_form_is_still_recognised():
+    """COVERED_FORMS is a promise about what this file measures. This is what stops it from
+    becoming a comment: delete a branch of the pattern and its sample stops classifying."""
+    for expected, sample in COVERED_FORMS:
+        found = citations(sample)
+        assert found, f"the declared form {expected} no longer matches anything: {sample!r}"
+        assert found[0][0] == expected, \
+            f"{sample!r} classified as {found[0][0]}, declared as {expected}"
+
+
+@pytest.mark.xfail(strict=True, reason=(
+    "RED ON PURPOSE, 2026-09-03, and red only until the citation commit that follows it. The "
+    "examples README ships inside the wheel and links to `../../docs/verify-certificate.md`, which "
+    "resolves in a git clone and resolves to nothing in an installed package because `docs/` is "
+    "not packaged. Committed red first because this one was MISSED by the previous sweep and "
+    "counted by hand afterwards: the log should show that the extractor could not see it before "
+    "it shows that the link was fixed. strict=True, so the fix removes this mark or the suite "
+    "fails."))
+def test_no_shipped_markdown_link_dangles_where_the_reader_will_open_it():
+    """A relative link in a file that ships must resolve FROM THAT FILE'S OWN DIRECTORY.
+
+    Not from the repository root: the reader who follows it has the installed package, where the
+    repository above `deadman/` does not exist. A link that only works in a clone is a link that
+    works for us and for nobody who did `pip install`.
+    """
+    dangling = []
+    for f in SHIPPED:
+        if f.suffix != ".md":
+            continue
+        for m in MD_LINK.finditer(f.read_text(encoding="utf-8")):
+            target = m.group("target").split("#")[0].strip()
+            if not target or "://" in target:
+                continue                                   # a URL is not ours to resolve
+            if not (f.parent / target).resolve().exists():
+                dangling.append(f"{f.name}: {m.group(0)[:70]} -> {target}")
+    assert not dangling, (
+        "these ship and resolve to nothing from where the reader opens them:\n  "
+        + "\n  ".join(dangling))
 
 
 # ---------------------------------------------------------------- external, said without lying
