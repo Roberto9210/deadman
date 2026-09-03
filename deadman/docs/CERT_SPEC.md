@@ -84,13 +84,15 @@ not survive recomputation is refused exactly as an unsigned one is.
 
 ## 4. The document
 
-**NORMATIVE.** A certificate MUST declare `ledgerDialect` (§A.1) and `limitations` (§2). A
-verifier refuses a certificate that omits either.
+**NORMATIVE.** A certificate MUST declare `ledgerDialect` (§A.1), `claims.ledgerRange` with
+integer `fromSeq <= toSeq`, `limitations` (§2), and `certHash`. A verifier refuses a certificate
+that omits any of them, and the refusal is a **contradiction** (§A.5): no better copy of such a
+document exists.
 
-**DESCRIPTIVE** (the same sentence, split 2026-09-03 — see §9). A certificate is also expected to
-declare `claims.ledgerRange` with integer `fromSeq <= toSeq`, `trustLevel`, and `certHash`, and
-this verifier refuses one that does not. The three are held back from normative only because no
-test yet fixes that refusal: the requirement is not weaker, the evidence for it is.
+**DESCRIPTIVE** (split from the sentence above 2026-09-03 — see §9). A certificate is also
+expected to declare `trustLevel`, and this verifier refuses one that does not. It is held back
+from normative only because no test yet fixes that refusal: the requirement is not weaker, the
+evidence for it is.
 
 **NORMATIVE, `certHash`.** `certHash` is the SHA-256 of the canonical JSON of the document **without
 `certHash` and without `signature`**. The second exclusion is forced rather than chosen: the
@@ -203,6 +205,25 @@ facts, and a tool that collapses them can be disabled by handing it a broken fil
 other way, can be made to accuse an honest holder who supplied the wrong file. **A verifier MUST NOT
 return 1 for a condition it did not measure.**
 
+**NORMATIVE, which code a refusal takes** (added 2026-09-03). One question sorts every case:
+**could a fully conforming certificate produce this condition?**
+
+- **Yes** — the wrong ledger file was supplied, or the producer is newer than this verifier ⇒ **2**.
+  Nobody is accused, because the verifier cannot tell an honest holder from a dishonest one here.
+- **No** — the certificate itself omits or malforms something this specification requires ⇒ **1**.
+
+The practical form of that test, and the reason it is not a matter of taste: **2 means *ask for a
+better copy*. A document missing a field it must carry does not improve when a better copy is
+asked for** — the document is what it is. Returning 2 there tells a caller to retry a condition
+that is permanent.
+
+**NORMATIVE, when both apply.** A finding measured **from the document alone** outranks an
+inability to read the ledger: such a run returns **1**, and MUST still report separately what it
+could not evaluate. This is not symmetry. `certHash` is computed before any check can refuse to
+look (§A.2) precisely because a forger who edited the document has every incentive to hand over a
+ledger the verifier will not open; if the exit code still said 2 in that case, **the exit code
+would undo that protection while the report was doing its job.**
+
 **GUIDANCE FOR CONSUMERS, not a conformance requirement** (relabelled 2026-09-03 — see §9). A
 script that consumes these codes should treat 2 as *ask for a better copy*, never as a pass. It is
 written here because it is the whole point of separating 2 from 0, and it is not NORMATIVE because
@@ -275,10 +296,16 @@ writing new public claims while correcting old ones is how the old ones got ther
 | demoted | why it has no test | what re-promotes it |
 |---|---|---|
 | **§1**, the four "this is not" | the behaviour is correct because the verifier never computes a profitability figure; **absence of a feature is not an implementation** | one test asserting no verdict carries such a figure |
-| **§4**, `ledgerRange` / `trustLevel` / `certHash` **being declared** | the refusals exist in code and nothing pins them; note that `certHash`'s *computation* is normative and tested — its *presence* is what was untested | a test per field that omits it and asserts the refusal |
+| **§4**, `trustLevel` **being declared** | the refusal exists in code and nothing pins it | a test that omits it and asserts the refusal |
 | **§4.3**, accounts appear as hashes | "names an account" is not a lexical property a sweep can decide, so no check was ever designed | a decidable definition first, then a check |
 | **§5**, trading elsewhere / bypass before start | both are emitted on every run and neither is asserted anywhere | one test reading a successful run's output |
 | **§A.5**, what scripts must do with 2 | it binds a **caller**, and no test of a verifier can observe its callers | nothing — it is guidance, correctly labelled |
+
+**Re-promoted the same day, and this is the mechanism working rather than an exception to it.**
+`claims.ledgerRange` and `certHash` were on the list above for one afternoon: the ruling that moved
+their refusals to exit 1 arrived with `tests/test_exit_code_semantics.py`, which pins exactly the
+refusals that were missing. **A demotion is a debt with a price on it, and this is what paying it
+looks like** — the requirement did not become truer, the evidence arrived.
 
 ### 9.2 Normative without a test, deliberately — one, and its reason
 

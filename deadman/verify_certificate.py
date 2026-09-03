@@ -389,11 +389,31 @@ class CertReport:
     unverified: list[Finding] = field(default_factory=list)
     unevaluable: list[Finding] = field(default_factory=list)
 
+    #: Set by the paths that give up before reading the ledger. The render needs it because such
+    #: a report has nothing to show - no dialect, no range, no chain - and printing the ordinary
+    #: block would fill it with the zeroes of work that never happened.
+    stopped_before_the_ledger: bool = False
+
     @property
     def exit_code(self) -> int:
+        # CONTRADICTED OUTRANKS UNEVALUABLE, changed 2026-09-03. A contradiction is a fact about
+        # something that WAS measured; an unevaluable finding is about something that could not
+        # be. Measuring something and finding it false is not undone by failing to measure
+        # something else.
+        #
+        # The case that forced it is adversarial and is the same one that moved `certHash` to the
+        # top of verification: a forger who edited the document has every incentive to hand over a
+        # ledger the verifier will refuse to open. While UNEVALUABLE outranked, that strategy kept
+        # working AT THE LEVEL OF THE EXIT CODE even after it stopped working in the report - the
+        # code would have undone the fix.
+        #
+        # It does not re-open DEF-6: a ledger cut short produces no contradictions by
+        # construction (claims are not compared at all on one), so a short file is still exit 2.
+        if self.contradictions:
+            return EXIT_CONTRADICTED
         if self.unevaluable:
             return EXIT_UNEVALUABLE
-        return EXIT_CONTRADICTED if self.contradictions else EXIT_OK
+        return EXIT_OK
 
     @property
     def ok(self) -> bool:
@@ -519,27 +539,29 @@ class CertReport:
         add("deadman-kit - verifiable session certificate")
         add("=" * 62)
 
-        if self.unevaluable:
-            add("")
-            add("COULD NOT EVALUATE - this is not a verdict on the certificate.")
-            for f in self.unevaluable:
-                add(f"  - {f}")
-            # A check that needs only the document can still have found something on this path,
-            # and computing it in order to swallow it here would be worse than not computing it.
+        if self.unevaluable or self.stopped_before_the_ledger:
+            # Verification stopped before the ledger was read, so the ordinary block below has
+            # nothing true to put in it. Both channels are printed, in the order of what they
+            # cost the reader: what was found first, what could not be looked at second.
             if self.contradictions:
                 add("")
-                add("FOUND ANYWAY - these were measured from the document alone, so being unable")
-                add("to read the ledger is no excuse for not reporting them:")
+                add("CONTRADICTIONS - measured from the document itself, needing no ledger:")
                 for f in self.contradictions:
+                    add(f"  - {f}")
+            if self.unevaluable:
+                add("")
+                add("COULD NOT EVALUATE - this part is not a verdict on the certificate.")
+                for f in self.unevaluable:
                     add(f"  - {f}")
             add("")
             if self.contradictions:
-                # The old sentence said "nothing was proved and nothing was disproved" here, and
+                # The old sentence here said "nothing was proved and nothing was disproved", and
                 # it was true until this branch could carry a finding. A closing line that keeps
-                # asserting the shape of the old code is exactly the kind of claim this file
-                # exists to catch, so it moves with the behaviour.
-                add("RESULT: UNEVALUABLE (exit 2) - the LEDGER could not be judged. The finding")
-                add("        above is not affected by that: it needed no ledger.")
+                # asserting the shape of the code it was written for is exactly the kind of claim
+                # this file exists to catch, so it moves with the behaviour.
+                add("RESULT: CONTRADICTED (exit 1). Being unable to read the ledger does not undo")
+                add("        a finding measured from the document alone. If it did, handing over")
+                add("        an unreadable ledger would be a way to escape the check.")
             else:
                 add("RESULT: UNEVALUABLE (exit 2). Nothing was proved and nothing was disproved.")
             return "\n".join(L)
@@ -1432,6 +1454,7 @@ def verify_certificate(cert: Mapping[str, Any],
 
     if not isinstance(cert, dict):
         rep.cannot_evaluate("CERT_MALFORMED", "the certificate is not a JSON object")
+        rep.stopped_before_the_ledger = True
         return rep
 
     # ---- what the DOCUMENT alone settles, computed before anything can refuse to look
@@ -1452,7 +1475,14 @@ def verify_certificate(cert: Mapping[str, Any],
     declared_hash = cert.get("certHash")
     actual_hash = _sha256_hex(_cert_preimage(cert))
     rep.cert_hash_ok = (declared_hash == actual_hash)
-    if not rep.cert_hash_ok:
+    if declared_hash is None:
+        # An OMISSION, and it gets its own code and its own sentence. The old wording -
+        # "certHash says None... but the document hashes to 1aacf1d2..." - reads as two hashes
+        # that disagree, and sends the holder looking for a value that was never there.
+        rep.contradict("CERTHASH_MISSING",
+                       "the certificate carries no `certHash`, so there is nothing to check the "
+                       "document against; every claim in it would have to be taken on trust")
+    elif not rep.cert_hash_ok:
         rep.contradict("CERTHASH_MISMATCH",
                        f"certHash says {str(declared_hash)[:16]}... but the document hashes "
                        f"to {actual_hash[:16]}...")
@@ -1460,14 +1490,25 @@ def verify_certificate(cert: Mapping[str, Any],
     # ---- dialect, declared and enforced (C17)
     dialect_name = cert.get("ledgerDialect")
     if dialect_name is None:
-        rep.cannot_evaluate("DIALECT_MISSING",
-                            "the certificate does not declare `ledgerDialect`; guessing it "
-                            "from the file's shape is what this field exists to prevent")
+        # CONTRADICTED, not UNEVALUABLE, changed 2026-09-03. `ledgerDialect` is required by
+        # CERT_SPEC §4, so a document without one does not conform, and NO BETTER COPY OF IT
+        # EXISTS - which is the practical test, because §A.5 documents exit 2 as "ask for a
+        # better copy". Telling a script to ask again for a permanent condition is an infinite
+        # loop with a polite name. Contrast DIALECT_MISMATCH below, which stays exit 2 because an
+        # honest certificate handed the wrong file produces it.
+        rep.contradict("DIALECT_MISSING",
+                       "the certificate does not declare `ledgerDialect`; guessing it "
+                       "from the file's shape is what this field exists to prevent")
+        rep.stopped_before_the_ledger = True
         return rep
     dialect = DIALECTS.get(dialect_name)
     if dialect is None:
+        # Stays UNEVALUABLE: an unknown dialect means a producer NEWER than this verifier, which
+        # is the argument CERT_SPEC §5 already makes for unknown event kinds - refusing would let
+        # one future name invalidate every certificate already issued.
         rep.cannot_evaluate("DIALECT_UNKNOWN",
                             f"unknown ledgerDialect {dialect_name!r}; known: {sorted(DIALECTS)}")
+        rep.stopped_before_the_ledger = True
         return rep
     rep.dialect = dialect.name
     rep.entries_read = len(ledger_entries)
@@ -1482,14 +1523,20 @@ def verify_certificate(cert: Mapping[str, Any],
         rep.cannot_evaluate("DIALECT_MISMATCH", mismatch)
         rep.cannot_verify("NOTHING_ELSE_CHECKED",
                           "verification stopped at the dialect check; no claim was recomputed")
+        rep.stopped_before_the_ledger = True
         return rep
 
     # ---- declared range
     rng = (cert.get("claims") or {}).get("ledgerRange") or {}
     from_seq, to_seq = rng.get("fromSeq"), rng.get("toSeq")
     if not isinstance(from_seq, int) or not isinstance(to_seq, int) or from_seq > to_seq:
-        rep.cannot_evaluate("RANGE_MISSING",
-                            "claims.ledgerRange must carry integer fromSeq <= toSeq")
+        # CONTRADICTED for the same reason as DIALECT_MISSING: CERT_SPEC §4 requires
+        # `claims.ledgerRange`, and a certificate that does not say what it covers cannot be
+        # repaired by supplying a different ledger.
+        rep.contradict("RANGE_MISSING",
+                       "the certificate does not declare `claims.ledgerRange` with integer "
+                       "fromSeq <= toSeq, so it does not say what it covers")
+        rep.stopped_before_the_ledger = True
         return rep
     rep.range_from, rep.range_to = from_seq, to_seq
 

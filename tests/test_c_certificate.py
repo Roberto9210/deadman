@@ -651,26 +651,53 @@ def test_c17_an_honest_certificate_cannot_be_smeared_with_the_wrong_ledger():
     assert "DIALECT_MISMATCH" in {f.code for f in smeared.unevaluable}
 
 
-def test_c17_an_undeclared_dialect_is_unevaluable_not_guessed():
+def test_c17_an_undeclared_dialect_is_refused_not_guessed():
+    """RENAMED 2026-09-03, and the rename is the point: this test asserted TWO properties under
+    one name, and only one of them survived.
+
+    "Not guessed" is the C17 guarantee and is unchanged - the verifier never sniffs the dialect
+    from the file's shape, because that is what lets a forger hand over a ledger built in whichever
+    schema suits the lie. "Unevaluable" was never a guarantee, it was the SEVERITY, and it moved:
+    a certificate that omits a field CERT_SPEC §4 requires does not conform, and no better copy of
+    it exists. Renaming rather than editing the assertion is deliberate - a test whose name still
+    promised UNEVALUABLE would be the file lying about itself.
+
+    The case that still belongs to exit 2 is the CROSSED dialect, which has its own tests above:
+    there an honest certificate handed the wrong file produces the same input as a lie."""
     entries = gledger(QUIET_DAY)
     cert = make_cert(entries, drop=())
     del cert["ledgerDialect"]
     rep = verify_certificate(cert, entries)
-    assert rep.exit_code == EXIT_UNEVALUABLE
-    assert any(f.code == "DIALECT_MISSING" for f in rep.unevaluable)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert any(f.code == "DIALECT_MISSING" for f in rep.contradictions)
+    assert "guessing" in " ".join(f.detail for f in rep.contradictions)
 
 
 # ================================================================== C18
 
 def test_c18_exit_codes_separate_a_lie_from_an_unreadable_input():
+    """THE EXEMPLAR FOR EXIT 2 WAS REPLACED 2026-09-03, not the guarantee.
+
+    It used a certificate with a malformed `claims.ledgerRange`, and that is no longer an
+    unreadable input: it is a document missing a field CERT_SPEC §4 requires, which is a defect of
+    the certificate and now exit 1. Leaving it here would have quietly turned this test into an
+    assertion that the two codes are the same.
+
+    What replaces it is an input that genuinely cannot be judged and is nobody's fault: a ledger
+    handed over in the wrong dialect, where an honest certificate and a lying one produce
+    identical input."""
     entries = gledger(BREACH_DAY)
     liar = make_cert(entries, overrides={"claims.lockoutsTriggered": 0})
     assert verify_certificate(liar, entries).exit_code == EXIT_CONTRADICTED
 
-    broken = make_cert(entries, overrides={"claims": {"ledgerRange": {"fromSeq": "x"}}})
-    assert verify_certificate(broken, entries).exit_code == EXIT_UNEVALUABLE
+    wrong_file = make_cert(entries, overrides={"ledgerDialect": "deadman-kit-v1"})
+    assert verify_certificate(wrong_file, entries).exit_code == EXIT_UNEVALUABLE
 
     assert verify_certificate(make_cert(entries), entries).exit_code == EXIT_OK
+
+    # And the replaced case, kept rather than dropped, on the side it moved to.
+    broken = make_cert(entries, overrides={"claims": {"ledgerRange": {"fromSeq": "x"}}})
+    assert verify_certificate(broken, entries).exit_code == EXIT_CONTRADICTED
 
 
 def test_c18_the_cli_returns_those_codes(tmp_path):

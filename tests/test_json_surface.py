@@ -2,8 +2,14 @@
 
 MEASURED FIRST, 2026-09-03. On four early-return paths - no `ledgerDialect`, an unknown dialect,
 a dialect that does not match the ledger, no `claims.ledgerRange` - the verifier reaches a verdict
-(exit 2, UNEVALUABLE) without ever looking at the chain and without computing `certHash`. The JSON
-published `chainOk: false`, `certHashOk: false` and `signature: "ABSENT"` anyway.
+without ever looking at the chain and without computing `certHash`. The JSON published
+`chainOk: false`, `certHashOk: false` and `signature: "ABSENT"` anyway.
+
+(All four returned exit 2 when this was written. Two of them return 1 since later the same day -
+a certificate missing a field CERT_SPEC §4 requires is a defect of the DOCUMENT, not an input the
+verifier failed to read. EXPECTED_EXIT below records which is which. The defect this file is about
+is unchanged by that: neither code entitles a report to state a result for a check that did not
+run.)
 
 WHY THIS IS WORSE THAN THE SAME DEFECT IN THE TEXT REPORT, and why it is its own file: the text
 render returns before printing figures, so a person never sees them. `--json` exists to be parsed.
@@ -59,6 +65,20 @@ def _run_json(tmp_path, cert, entries):
     return r.returncode, json.loads(r.stdout)
 
 
+#: What each path is worth as a verdict, recorded here rather than assumed. Two of the four are
+#: defects OF THE CERTIFICATE - a field CERT_SPEC §4 requires is absent, and no better copy of the
+#: document exists - and two are conditions a fully conforming certificate can produce: the wrong
+#: ledger file, and a producer newer than this verifier. tests/test_exit_code_semantics.py is where
+#: that sorting is argued; this table is here so a reader of THIS file is not left guessing which
+#: case is which.
+EXPECTED_EXIT = {
+    "no dialect declared": 1,
+    "unknown dialect": 2,
+    "crossed dialect": 2,
+    "no ledgerRange": 1,
+}
+
+
 def _cases():
     """The four paths that reach a verdict without reading the ledger, each named by what it is.
 
@@ -95,7 +115,8 @@ def test_no_unrun_check_publishes_a_result(tmp_path):
     offenders = []
     for name, cert in cases.items():
         code, out = _run_json(tmp_path, cert, entries)
-        assert code == 2, f"{name}: expected UNEVALUABLE, got {code}"
+        assert code == EXPECTED_EXIT[name], f"{name}: expected {EXPECTED_EXIT[name]}, got {code}"
+        assert code != 0, f"{name} was not refused"
         for key in ("chainOk", "signature"):
             if key in out:
                 offenders.append(f"{name}: {key}={out[key]!r} for a check that never ran")
@@ -177,7 +198,10 @@ def test_a_finding_that_needs_no_ledger_is_shown_even_when_the_ledger_was_not_re
     test fixes only that the finding must be VISIBLE, which is true under either answer.
     """
     entries, cases = _cases()
-    cert = cases["no dialect declared"]
+    # The CROSSED dialect, not the missing one: since 2026-09-03 a missing `ledgerDialect` is
+    # itself a contradiction, so it would no longer exercise the mixed case this test is about -
+    # a finding measured from the document BESIDE a ledger that could not be judged.
+    cert = cases["crossed dialect"]
     cert["certHash"] = "0" * 64
 
     ledger = tmp_path / "ledger.jsonl"
@@ -191,6 +215,7 @@ def test_a_finding_that_needs_no_ledger_is_shown_even_when_the_ledger_was_not_re
 
     assert "COULD NOT EVALUATE" in r.stdout
     assert "certHash" in r.stdout, "the mismatch was computed and never shown:\n" + r.stdout
+    assert "CONTRADICTED" in r.stdout
     assert "Nothing was proved and nothing was disproved" not in r.stdout, \
         "something WAS disproved; that sentence is now false:\n" + r.stdout
 
@@ -202,7 +227,7 @@ def test_the_unevaluable_sentence_survives_when_nothing_was_disproved(tmp_path):
     ledger = tmp_path / "ledger.jsonl"
     ledger.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
     doc = tmp_path / "cert.json"
-    doc.write_text(json.dumps(cases["no dialect declared"]), encoding="utf-8")
+    doc.write_text(json.dumps(cases["crossed dialect"]), encoding="utf-8")
     env = dict(os.environ)
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     r = subprocess.run([sys.executable, "-m", "deadman.verify_certificate", str(doc), str(ledger)],
@@ -236,8 +261,10 @@ def test_the_keys_a_consumer_must_be_able_to_rely_on_are_always_there(tmp_path):
         for key in ("result", "declaredLevel", "contradictions",
                     "couldNotVerify", "couldNotEvaluate"):
             assert key in out, f"{name}: {key} must survive on every path"
-        assert out["result"] == "UNEVALUABLE"
-        assert out["couldNotEvaluate"], f"{name}: an unevaluable report must say why"
+        assert out["result"] == ("CONTRADICTED" if EXPECTED_EXIT[name] == 1 else "UNEVALUABLE")
+        # Whichever channel it took, the report must NAME what it found. A refusal that lists
+        # nothing is the same as no refusal to whoever has to act on it.
+        assert out["contradictions"] or out["couldNotEvaluate"], f"{name}: refused, said nothing"
 
 
 def test_a_clean_series_does_not_print_a_broken_chain_under_a_green_verdict():
