@@ -364,10 +364,15 @@ class CertReport:
     #: The last seq actually present, when the ledger stops before the declared range ends.
     #: Every recomputed claim is over from..this, never over the declared end.
     effective_to: Optional[int] = None
-    chain_ok: bool = False
+    #: None means THE CHECK DID NOT RUN, and it is not the same as False. Until 2026-09-03 all
+    #: three defaulted to their ADVERSE value, so a report that returned before opening the ledger
+    #: still published `chainOk: false`, `certHashOk: false` and `signature: "ABSENT"` - the tool
+    #: accusing the holder of a broken chain it never read. A field that cannot say "I did not
+    #: look" says "no", which is the same defect as a boolean that cannot say "undetermined".
+    chain_ok: Optional[bool] = None
     broken_seq: Optional[int] = None
-    cert_hash_ok: bool = False
-    signature_status: str = "ABSENT"
+    cert_hash_ok: Optional[bool] = None
+    signature_status: Optional[str] = None
     covered_up_to_seq: Optional[int] = None
     anchors_checked: int = 0
     recomputed: dict = field(default_factory=dict)
@@ -512,8 +517,24 @@ class CertReport:
             add("COULD NOT EVALUATE - this is not a verdict on the certificate.")
             for f in self.unevaluable:
                 add(f"  - {f}")
+            # A check that needs only the document can still have found something on this path,
+            # and computing it in order to swallow it here would be worse than not computing it.
+            if self.contradictions:
+                add("")
+                add("FOUND ANYWAY - these were measured from the document alone, so being unable")
+                add("to read the ledger is no excuse for not reporting them:")
+                for f in self.contradictions:
+                    add(f"  - {f}")
             add("")
-            add("RESULT: UNEVALUABLE (exit 2). Nothing was proved and nothing was disproved.")
+            if self.contradictions:
+                # The old sentence said "nothing was proved and nothing was disproved" here, and
+                # it was true until this branch could carry a finding. A closing line that keeps
+                # asserting the shape of the old code is exactly the kind of claim this file
+                # exists to catch, so it moves with the behaviour.
+                add("RESULT: UNEVALUABLE (exit 2) - the LEDGER could not be judged. The finding")
+                add("        above is not affected by that: it needed no ledger.")
+            else:
+                add("RESULT: UNEVALUABLE (exit 2). Nothing was proved and nothing was disproved.")
             return "\n".join(L)
 
         add(f"ledger dialect  : {self.dialect}  ({self.entries_read} entries read)")
@@ -521,8 +542,12 @@ class CertReport:
             add(f"declared range  : seq {self.range_from}..{self.range_to}")
         add("")
 
-        chain = "OK" if self.chain_ok else f"BROKEN at seq {self.broken_seq}"
-        add(f"  chain         {chain}")
+        # Omitted rather than guessed when the check did not run: `verify_series` reaches this
+        # render without ever opening a ledger, and printed "chain BROKEN at seq None" four lines
+        # above "RESULT: VERIFIED at series (exit 0)".
+        if self.chain_ok is not None:
+            chain = "OK" if self.chain_ok else f"BROKEN at seq {self.broken_seq}"
+            add(f"  chain         {chain}")
         # NO "claims over ..." line here, and the absence is the point: `effective_to` differs from
         # the declared end ONLY on a truncated ledger, and a truncated ledger is UNEVALUABLE, which
         # returns twenty lines above without printing a single figure. A line guarding a case that
@@ -533,11 +558,13 @@ class CertReport:
         # verdict says they establish nothing. `effective_to` stays as DATA - it reaches --json,
         # where a consumer parses rather than reads - and the truncation message already names the
         # sequence the ledger stops at.
-        add(f"  certHash      {'matches' if self.cert_hash_ok else 'DOES NOT MATCH'}")
+        if self.cert_hash_ok is not None:
+            add(f"  certHash      {'matches' if self.cert_hash_ok else 'DOES NOT MATCH'}")
         add(f"  claims        {len(self.recomputed)} recomputed from events")
         add(f"  anchors       {self.anchors_checked} checked"
             + (f", covered up to seq {self.covered_up_to_seq}" if self.covered_up_to_seq else ""))
-        add(f"  signature     {self.signature_status}")
+        if self.signature_status is not None:
+            add(f"  signature     {self.signature_status}")
         if self.recomputed.get("limitStatus") == "undetermined":
             add("  limit         UNDETERMINED - a fail-closed episode is still open with no\n                              breach recorded, so the guardian could not see. This is NOT a\n                              statement that the trader went past a limit")
         add("")
@@ -1397,6 +1424,29 @@ def verify_certificate(cert: Mapping[str, Any],
         rep.cannot_evaluate("CERT_MALFORMED", "the certificate is not a JSON object")
         return rep
 
+    # ---- what the DOCUMENT alone settles, computed before anything can refuse to look
+    #
+    # CERT_SPEC section A.2: a verifier MUST recompute `certHash` on any path that reaches a
+    # verdict. Until 2026-09-03 it did not - the computation sat past four `return rep`s (no
+    # dialect, unknown dialect, crossed dialect, no range), and on those paths the report went out
+    # with `certHashOk: false` for a hash that was never taken.
+    #
+    # The reason it belongs FIRST, and not merely repeated in each early exit, is adversarial: a
+    # forger who has edited the document has every reason to hand over a ledger the verifier will
+    # refuse to open. Computing the hash last turned "unreadable ledger" into a way to skip the
+    # one check that needs no ledger at all.
+    #
+    # `trustLevel` moves for the plainer reason: it is a FIELD OF THE CERTIFICATE, not a finding.
+    # Reporting `declaredLevel: null` said the document declared nothing, and the document said L1.
+    rep.declared_level = cert.get("trustLevel")
+    declared_hash = cert.get("certHash")
+    actual_hash = _sha256_hex(_cert_preimage(cert))
+    rep.cert_hash_ok = (declared_hash == actual_hash)
+    if not rep.cert_hash_ok:
+        rep.contradict("CERTHASH_MISMATCH",
+                       f"certHash says {str(declared_hash)[:16]}... but the document hashes "
+                       f"to {actual_hash[:16]}...")
+
     # ---- dialect, declared and enforced (C17)
     dialect_name = cert.get("ledgerDialect")
     if dialect_name is None:
@@ -1420,7 +1470,6 @@ def verify_certificate(cert: Mapping[str, Any],
         # certificate by handing over the wrong ledger - the same failure the exit-code table
         # warns about, pointed at the holder instead of at the tool.
         rep.cannot_evaluate("DIALECT_MISMATCH", mismatch)
-        rep.declared_level = cert.get("trustLevel")
         rep.cannot_verify("NOTHING_ELSE_CHECKED",
                           "verification stopped at the dialect check; no claim was recomputed")
         return rep
@@ -1484,15 +1533,6 @@ def verify_certificate(cert: Mapping[str, Any],
                        f"the declared range covers seq {from_seq}..{to_seq} but "
                        f"{len(absent)} entr{'y is' if len(absent) == 1 else 'ies are'} "
                        f"missing from the ledger (first: {absent[0]})")
-
-    # ---- certHash
-    declared_hash = cert.get("certHash")
-    actual = _sha256_hex(_cert_preimage(cert))
-    rep.cert_hash_ok = (declared_hash == actual)
-    if not rep.cert_hash_ok:
-        rep.contradict("CERTHASH_MISMATCH",
-                       f"certHash says {str(declared_hash)[:16]}... but the document hashes "
-                       f"to {actual[:16]}...")
 
     # ---- claims, recomputed OVER WHAT IS ACTUALLY THERE
     #
@@ -1638,8 +1678,7 @@ def verify_certificate(cert: Mapping[str, Any],
             reached = "L2"
             if sig_ok:
                 reached = "L3"
-    rep.reached_level = reached
-    rep.declared_level = cert.get("trustLevel")
+    rep.reached_level = reached          # `declared_level` was read at the top, from the document
 
     order = {"L1": 1, "L2": 2, "L3": 3}
     if rep.declared_level in order and reached is not None:
@@ -1908,17 +1947,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rep = verify_certificate(cert, entries, anchors=anchors, pubkey_path=args.pubkey)
 
     if args.json:
-        print(json.dumps({
+        # OMITTED, not null, for a check that did not run - the verifier's own rule (CERT_SPEC
+        # section 4.1) applied to its own output. Omission over null because of the CONSUMER:
+        # `null` is falsy everywhere this will be parsed, so `if not out["certHashOk"]` keeps
+        # exactly the false accusation being removed. A missing key raises instead of lying.
+        #
+        # The cost is real and is accepted knowingly: the key set now varies with how far the
+        # verification got. What never varies is `result`, `declaredLevel`, `contradictions`,
+        # `couldNotVerify` and `couldNotEvaluate`, which is everything needed to ask "did this
+        # pass, and if not, why" on any path. `reachedLevel` stays null on purpose - null there
+        # is the MEASURED answer, not an absence: no layer was reached.
+        payload = {
             "result": ["VERIFIED", "CONTRADICTED", "UNEVALUABLE"][rep.exit_code],
             "declaredLevel": rep.declared_level, "reachedLevel": rep.reached_level,
-            "chainOk": rep.chain_ok, "certHashOk": rep.cert_hash_ok,
             "anchorsChecked": rep.anchors_checked, "coveredUpToSeq": rep.covered_up_to_seq,
-            "signature": rep.signature_status,
             "effectiveToSeq": rep.effective_to,
             "contradictions": [{"code": f.code, "detail": f.detail} for f in rep.contradictions],
             "couldNotVerify": [{"code": f.code, "detail": f.detail} for f in rep.unverified],
             "couldNotEvaluate": [{"code": f.code, "detail": f.detail} for f in rep.unevaluable],
-        }, indent=2, ensure_ascii=False))
+        }
+        if rep.chain_ok is not None:
+            payload["chainOk"] = rep.chain_ok
+        if rep.cert_hash_ok is not None:
+            payload["certHashOk"] = rep.cert_hash_ok
+        if rep.signature_status is not None:
+            payload["signature"] = rep.signature_status
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         print(rep.render())
     return rep.exit_code
