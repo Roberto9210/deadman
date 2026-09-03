@@ -294,3 +294,53 @@ each.
 ## Friction
 
 One, and it is the discarded attempt above. Nothing was fixed during the run.
+
+---
+
+# Run 4 - 2026-09-03 (deadman-kit 0.3.0, BEFORE publishing)
+
+**This run is a different instrument from runs 1-3, and the difference is the whole point.** Those
+installed from PyPI to find out what a stranger already gets. This one installs the LOCAL wheel, as
+a gate: it runs before the upload so that a bad artefact is never published rather than audited
+afterwards. Everything runs from a temporary directory with the repository off `sys.path`, because
+this machine holds the source and a check that runs inside the tree can pass by importing the very
+thing it was meant to test.
+
+The stale-index trap that voided the first attempt of run 3 does not apply here - there is no index
+- so the version is asserted against the artefact instead. That asymmetry is worth naming: a
+pre-publication run cannot catch the failures runs 1-3 exist to catch, and a post-publication run
+cannot stop anything. **They are not substitutes, and this one does not retire the others.** A run
+from PyPI is still owed once 0.3.0 is live.
+
+## What was checked, and all of it held
+
+**Environment honesty** - installed version `0.3.0`; package resolving inside the cold venv, not
+the repository; repository absent from the path; **zero non-stdlib modules loaded**; zero
+dependencies pulled.
+
+**The thing this release exists to fix.** `CERT_SPEC.md` is inside the installed package, and it
+is byte-identical to the repository's copy (sha256 `daa01bf0…`). `--spec` exits 0, prints a path
+that exists on disk, points **inside the venv rather than at any repository**, and the document
+found there declares the version the code claims. That chain is the whole answer to the defect: a
+reader who installs from PyPI and follows a citation in the source now arrives somewhere.
+
+**The verifier on the certificates it ships.** The honest one passes at exit 0 and names the layer
+it reached; the tampered and the truncated one are both **CONTRADICTED at exit 1**; a certificate
+handed over **without its ledger is UNEVALUABLE at exit 2, not a pass**.
+
+**The two contract changes, observed from outside the repository**, which is the only place they
+matter:
+
+- `--json` on a verified run parses, carries `spec`, and reports `chainOk` and `certHashOk` as
+  `true` - the checks that actually ran.
+- A certificate with `ledgerDialect` removed is **exit 1, not exit 2**: a mandatory field that is
+  absent is a defect of the document, and asking for a better copy will not produce one.
+- That same stopped run **omits `chainOk` entirely** instead of publishing `false` for a check it
+  never performed, and **still reports `certHashOk`**, because that computation was moved ahead of
+  every early return. It reports `false`, which is correct and is the point: the document was
+  modified after sealing, and the cheapest check in the tool caught it on a path where it used to
+  never run at all.
+
+## Friction
+
+None. Nothing was fixed during the run.
