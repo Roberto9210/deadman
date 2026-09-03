@@ -525,6 +525,40 @@ Cinco tests nuevos. Contra el código viejo fallan **exactamente los dos que afi
 arreglo**, y los **tres controles de conducta preservada pasan en las dos versiones** — que es
 la forma que prueba que el cambio tocó lo que quería y nada más.
 
+### SEGUNDA MITAD APLICADA (2026-09-02)
+
+**Un ledger truncado no es una versión más corta de la misma evidencia: es una POBLACIÓN
+DISTINTA.** Recomputar sobre el rango DECLARADO y después comparar contra un certificado escrito
+sobre el rango completo compara dos conjuntos distintos y llama desacuerdo a la diferencia. La
+primera mitad frenó que esa diferencia se **cobrara**; ésta frena que se **compute** como si
+significara algo.
+
+| | antes de esta mitad | ahora |
+|---|---|---|
+| sobre qué rango se recomputa | el **declarado** (que no se tiene) | el **efectivo**: hasta la última fila presente |
+| la comparación de claims | corre, y cada diferencia sale como `CLAIM_MISMATCH_OVER_TRUNCATED_RANGE` | **no corre**: una línea `CLAIMS_NOT_COMPARABLE` |
+| **CONTROL** ledger completo | compara todo | **compara todo** |
+| **CONTROL** mentira sobre ledger completo | exit 1 | **exit 1** |
+| **CONTROL** adulteración sobre archivo corto | `CHAIN_BROKEN` | **`CHAIN_BROKEN`** |
+
+Una lista de diferencias por claim decía **N veces lo mismo** —el archivo está corto— con la forma
+de N hallazgos.
+
+#### Y saqué una línea de render por inalcanzable, que es la clase que este repo cataloga
+
+Agregué un `claims over seq A..B` al informe, para que la cifra dijera sobre qué rango se computó.
+**Es inalcanzable**: `effective_to` difiere del declarado **sólo** con un ledger truncado, y un
+ledger truncado es `UNEVALUABLE`, que retorna veinte líneas antes sin imprimir una sola cifra.
+
+**Y el retorno temprano está bien, no es un hueco que haya que rodear**: bajo `UNEVALUABLE` no se
+probó nada, así que mostrar números recomputados sería darle al lector cifras para ordenar mientras
+el veredicto dice que no establecen nada — exactamente el mal uso que describe la regla de §CLAUDE
+sobre las cifras ordenables, escrita hoy.
+
+**Mi test asertaba lo contrario y el render tenía razón.** El test quedó dado vuelta: ahora fija que
+un informe inevaluable **no muestra ninguna cifra**. `effective_to` sobrevive como **dato** y llega
+a `--json`, donde un consumidor parsea en vez de leer.
+
 ### Segunda mitad, pendiente, y puede ir detrás de 6b
 
 **No recomputar afirmaciones sobre un rango que no se tiene.** Hoy `recompute_claims`
@@ -1946,7 +1980,7 @@ corregir los blobs, o corregir la frase.
    acuse. Falta sólo la limitación de causas, que espera al emisor. Era: y la
    limitación de causas (emisor primero, verificador después: §DEF-2 ruling parte 3). La
    comparación es además lo que reemplaza al chequeo de forma que la procedencia acaba de quitar.
-4. **DEF-6 primera mitad** — **HECHO (2026-09-01, `514205c`)**: el truncamiento deja de acusar.
+4. ~~**DEF-6**~~ — **HECHO**: primera mitad 2026-09-01 (`514205c`), el truncamiento deja de acusar; segunda mitad 2026-09-02, deja de computarse sobre un rango que no se tiene.
 5. ~~**DEF-4**~~ — **HECHO (2026-09-02)**: la severidad sigue al daño y ya no depende de que `dayKey` esté. Era: con
    `certificate-truncated.json` sin `dayKey` como control. **Por calendario**: el emisor está por
    limpiar los seis `?? ""` y la regla tiene que existir antes que la limpieza.

@@ -361,6 +361,9 @@ class CertReport:
     entries_read: int = 0
     range_from: Optional[int] = None
     range_to: Optional[int] = None
+    #: The last seq actually present, when the ledger stops before the declared range ends.
+    #: Every recomputed claim is over from..this, never over the declared end.
+    effective_to: Optional[int] = None
     chain_ok: bool = False
     broken_seq: Optional[int] = None
     cert_hash_ok: bool = False
@@ -520,6 +523,16 @@ class CertReport:
 
         chain = "OK" if self.chain_ok else f"BROKEN at seq {self.broken_seq}"
         add(f"  chain         {chain}")
+        # NO "claims over ..." line here, and the absence is the point: `effective_to` differs from
+        # the declared end ONLY on a truncated ledger, and a truncated ledger is UNEVALUABLE, which
+        # returns twenty lines above without printing a single figure. A line guarding a case that
+        # cannot reach it would be defensive code telling the reader the case can happen.
+        #
+        # And the early return is right, not a gap to route around: under UNEVALUABLE nothing was
+        # proved, so showing recomputed numbers would hand a reader figures to rank while the
+        # verdict says they establish nothing. `effective_to` stays as DATA - it reaches --json,
+        # where a consumer parses rather than reads - and the truncation message already names the
+        # sequence the ledger stops at.
         add(f"  certHash      {'matches' if self.cert_hash_ok else 'DOES NOT MATCH'}")
         add(f"  claims        {len(self.recomputed)} recomputed from events")
         add(f"  anchors       {self.anchors_checked} checked"
@@ -1481,20 +1494,34 @@ def verify_certificate(cert: Mapping[str, Any],
                        f"certHash says {str(declared_hash)[:16]}... but the document hashes "
                        f"to {actual[:16]}...")
 
-    # ---- claims, recomputed and compared
-    rep.recomputed = recompute_claims(ledger_entries, dialect, from_seq, to_seq, rep.chain_ok)
-    rep.continuity = recompute_continuity(ledger_entries, dialect, from_seq, to_seq)
-    rep.backwards_time = find_backwards_timestamps(ledger_entries, dialect, from_seq, to_seq)
+    # ---- claims, recomputed OVER WHAT IS ACTUALLY THERE
+    #
+    # A truncated ledger is not a shorter version of the same evidence: it is a DIFFERENT
+    # POPULATION. Recomputing over the DECLARED range and then comparing against a certificate
+    # written over the full range compares two different sets and calls the difference a
+    # disagreement. The first half of this fix stopped that difference being CHARGED; this half
+    # stops it being COMPUTED as though it meant something.
+    #
+    # So the effective end is the last row present, every figure says which range it is over, and
+    # the comparison does not run - because there is nothing honest to compare. One line saying so
+    # beats a list of per-claim differences that all say the same thing: the file is short.
+    rep.effective_to = (absent[0] - 1) if truncated else to_seq
+    rep.recomputed = recompute_claims(ledger_entries, dialect, from_seq, rep.effective_to,
+                                      rep.chain_ok)
+    rep.continuity = recompute_continuity(ledger_entries, dialect, from_seq, rep.effective_to)
+    rep.backwards_time = find_backwards_timestamps(ledger_entries, dialect, from_seq,
+                                                   rep.effective_to)
     claimed = cert.get("claims") or {}
     commitment = cert.get("commitment") or {}
 
     def disagree(code: str, detail: str) -> None:
-        """On a truncated ledger a disagreement is not a finding against the certificate.
+        """Routes a disagreement, and can no longer see a truncated ledger.
 
-        The claims are still recomputed - WHEN they are recomputed does not change here - but they
-        were recomputed over rows that are missing their tail, so a difference says the file is
-        short, not that the holder lied. Losing a FAIL_CLOSED_CLEARED is enough to turn
-        `limitRespected` false. Reported, never charged."""
+        The first half of DEF-6 DOWNGRADED a disagreement on a short file instead of charging it.
+        With the comparison now skipped outright, that downgrade has nothing left to do - which is
+        the stronger outcome and not a regression: a difference between two different ranges was
+        never evidence of anything. The branch stays so that any future path which compares under
+        truncation reports rather than accuses."""
         if truncated:
             rep.cannot_verify(code + "_OVER_TRUNCATED_RANGE",
                               detail + " - recomputed over an incomplete ledger, so this is a "
@@ -1510,59 +1537,68 @@ def verify_certificate(cert: Mapping[str, Any],
             disagree("CLAIM_MISMATCH",
                      f"`{key}`: certificate says {theirs!r}, the events say {mine!r}")
 
-    _compare_limit(rep, rep.recomputed["limitStatus"], claimed, disagree)
-    compare("lockoutsTriggered", rep.recomputed["lockoutsTriggered"], claimed.get("lockoutsTriggered"))
-    compare("ordersRejectedWhileLocked", rep.recomputed["ordersRejectedWhileLocked"],
-            claimed.get("ordersRejectedWhileLocked"))
-    compare("clockAnomalies", rep.recomputed["clockAnomalies"], claimed.get("clockAnomalies"))
-    compare("changeAttemptsWhileSealed", rep.recomputed["changeAttemptsWhileSealed"],
-            commitment.get("changeAttemptsWhileSealed"))
-
-    mine_eps = rep.recomputed["failClosedEpisodes"]
-    theirs_eps = claimed.get("failClosedEpisodes")
-    if theirs_eps is None:
-        rep.cannot_verify("CLAIM_ABSENT",
-                          f"the certificate does not state `failClosedEpisodes`; recomputed "
-                          f"{len(mine_eps)}")
-    elif len(theirs_eps) != len(mine_eps):
-        disagree("CLAIM_MISMATCH",
-                   f"`failClosedEpisodes`: certificate lists {len(theirs_eps)}, the events "
-                       f"give {len(mine_eps)}")
+    if truncated:
+        rep.cannot_verify(
+            "CLAIMS_NOT_COMPARABLE",
+            f"the certificate's claims describe seq {from_seq}..{to_seq} and the ledger stops "
+            f"at {rep.effective_to}, so the two describe DIFFERENT SETS OF EVENTS. Comparing "
+            f"them would report the missing tail as a disagreement. Everything recomputed here "
+            f"is over {from_seq}..{rep.effective_to} and is reported as such. Ask for a "
+            f"complete ledger")
     else:
-        for i, (m, t) in enumerate(zip(mine_eps, theirs_eps)):
-            if t.get("reasons") is not None and t["reasons"] != m["reasons"]:
-                disagree("CLAIM_MISMATCH",
-                           f"`failClosedEpisodes[{i}].reasons`: certificate says "
-                               f"{t['reasons']!r}, the events say {m['reasons']!r}")
-            if bool(t.get("open")) != bool(m["open"]):
-                disagree("CLAIM_MISMATCH",
-                           f"`failClosedEpisodes[{i}].open`: certificate says "
-                               f"{t.get('open')!r}, the events say {m['open']!r}")
-            # The field that assigns blame was the ONE field in this block nobody checked:
-            # measured, replacing it with a fabrication verified clean at exit 0 while a
-            # falsified `reasons` was caught. Indefensible in an evidence artefact, so it is
-            # compared now. Either name is accepted: the emitter still writes `triggerEvent`
-            # and renaming a field of the CERTIFICATE is its side of the contract, not ours.
-            #
-            # And what this comparison is worth, said plainly rather than oversold: the emitter
-            # derives this field by adjacency too, so it will agree with us on every honest
-            # certificate. That closes "anybody can write anything" and closes nothing else.
-            # What makes the document true is the NAME no longer claiming a cause, plus the
-            # limitation the emitter has yet to ship.
-            theirs_prev = t.get("precedingEvent", t.get("triggerEvent", _MISSING))
-            if theirs_prev is _MISSING:
-                rep.cannot_verify("CLAIM_ABSENT",
-                                  f"`failClosedEpisodes[{i}]` names no preceding event; "
-                                  f"recomputed {m['precedingEvent']!r}")
-            elif theirs_prev != m["precedingEvent"]:
-                disagree("CLAIM_MISMATCH",
-                           f"`failClosedEpisodes[{i}].precedingEvent`: certificate says "
-                               f"{theirs_prev!r}, the events say {m['precedingEvent']!r}")
-            theirs_seq = t.get("precedingSeq", t.get("triggerSeq", _MISSING))
-            if theirs_seq is not _MISSING and theirs_seq != m["precedingSeq"]:
-                disagree("CLAIM_MISMATCH",
-                           f"`failClosedEpisodes[{i}].precedingSeq`: certificate says "
-                               f"{theirs_seq!r}, the events say {m['precedingSeq']!r}")
+        _compare_limit(rep, rep.recomputed["limitStatus"], claimed, disagree)
+        compare("lockoutsTriggered", rep.recomputed["lockoutsTriggered"], claimed.get("lockoutsTriggered"))
+        compare("ordersRejectedWhileLocked", rep.recomputed["ordersRejectedWhileLocked"],
+                claimed.get("ordersRejectedWhileLocked"))
+        compare("clockAnomalies", rep.recomputed["clockAnomalies"], claimed.get("clockAnomalies"))
+        compare("changeAttemptsWhileSealed", rep.recomputed["changeAttemptsWhileSealed"],
+                commitment.get("changeAttemptsWhileSealed"))
+
+        mine_eps = rep.recomputed["failClosedEpisodes"]
+        theirs_eps = claimed.get("failClosedEpisodes")
+        if theirs_eps is None:
+            rep.cannot_verify("CLAIM_ABSENT",
+                              f"the certificate does not state `failClosedEpisodes`; recomputed "
+                              f"{len(mine_eps)}")
+        elif len(theirs_eps) != len(mine_eps):
+            disagree("CLAIM_MISMATCH",
+                       f"`failClosedEpisodes`: certificate lists {len(theirs_eps)}, the events "
+                           f"give {len(mine_eps)}")
+        else:
+            for i, (m, t) in enumerate(zip(mine_eps, theirs_eps)):
+                if t.get("reasons") is not None and t["reasons"] != m["reasons"]:
+                    disagree("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].reasons`: certificate says "
+                                   f"{t['reasons']!r}, the events say {m['reasons']!r}")
+                if bool(t.get("open")) != bool(m["open"]):
+                    disagree("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].open`: certificate says "
+                                   f"{t.get('open')!r}, the events say {m['open']!r}")
+                # The field that assigns blame was the ONE field in this block nobody checked:
+                # measured, replacing it with a fabrication verified clean at exit 0 while a
+                # falsified `reasons` was caught. Indefensible in an evidence artefact, so it is
+                # compared now. Either name is accepted: the emitter still writes `triggerEvent`
+                # and renaming a field of the CERTIFICATE is its side of the contract, not ours.
+                #
+                # And what this comparison is worth, said plainly rather than oversold: the emitter
+                # derives this field by adjacency too, so it will agree with us on every honest
+                # certificate. That closes "anybody can write anything" and closes nothing else.
+                # What makes the document true is the NAME no longer claiming a cause, plus the
+                # limitation the emitter has yet to ship.
+                theirs_prev = t.get("precedingEvent", t.get("triggerEvent", _MISSING))
+                if theirs_prev is _MISSING:
+                    rep.cannot_verify("CLAIM_ABSENT",
+                                      f"`failClosedEpisodes[{i}]` names no preceding event; "
+                                      f"recomputed {m['precedingEvent']!r}")
+                elif theirs_prev != m["precedingEvent"]:
+                    disagree("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].precedingEvent`: certificate says "
+                                   f"{theirs_prev!r}, the events say {m['precedingEvent']!r}")
+                theirs_seq = t.get("precedingSeq", t.get("triggerSeq", _MISSING))
+                if theirs_seq is not _MISSING and theirs_seq != m["precedingSeq"]:
+                    disagree("CLAIM_MISMATCH",
+                               f"`failClosedEpisodes[{i}].precedingSeq`: certificate says "
+                                   f"{theirs_seq!r}, the events say {m['precedingSeq']!r}")
 
     # ---- rule 5: fields that promise more than they carry
     for code, detail in check_rule_five(cert):
@@ -1878,6 +1914,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "chainOk": rep.chain_ok, "certHashOk": rep.cert_hash_ok,
             "anchorsChecked": rep.anchors_checked, "coveredUpToSeq": rep.covered_up_to_seq,
             "signature": rep.signature_status,
+            "effectiveToSeq": rep.effective_to,
             "contradictions": [{"code": f.code, "detail": f.detail} for f in rep.contradictions],
             "couldNotVerify": [{"code": f.code, "detail": f.detail} for f in rep.unverified],
             "couldNotEvaluate": [{"code": f.code, "detail": f.detail} for f in rep.unevaluable],

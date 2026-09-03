@@ -1295,6 +1295,95 @@ def test_the_kit_vocabulary_here_matches_the_kit_itself():
     assert KNOWN_EVENTS["deadman-kit-v1"] == frozenset(KINDS)
 
 
+# ================================================================== DEF-6, second half
+
+def test_def6b_claims_are_recomputed_over_what_is_there_not_over_what_was_declared():
+    """A truncated ledger is not a shorter version of the same evidence: it is a DIFFERENT
+    POPULATION. Recomputing over the declared range while the rows stop earlier means every figure
+    silently describes a range the verifier does not have."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+
+    short = entries[:-3]
+    rep = verify_certificate(cert, short)
+
+    assert rep.range_to == len(entries), "the certificate still declares the full range"
+    assert rep.effective_to == len(short), "the claims must be over the rows that exist"
+
+    over_short = recompute_claims(short, GUARDIAN_CORE_V1, 1, len(short), True)
+    assert rep.recomputed["failClosedEpisodes"] == over_short["failClosedEpisodes"]
+    assert rep.recomputed["limitStatus"] == over_short["limitStatus"]
+
+
+def test_def6b_the_claims_are_not_compared_at_all_on_a_short_ledger():
+    """Comparing a certificate written over 1..N against figures recomputed over 1..N-3 reports
+    the MISSING TAIL as a disagreement, once per claim. One line saying the two describe different
+    sets is the whole honest content of that list."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    rep = verify_certificate(cert, entries[:-3])
+
+    codes = {f.code for f in rep.unverified}
+    assert "CLAIMS_NOT_COMPARABLE" in codes
+    assert not any(c.startswith("CLAIM_MISMATCH") for c in codes), codes
+    assert not rep.contradictions, "a short file is never a charge"
+    assert rep.exit_code == EXIT_UNEVALUABLE
+
+
+def test_def6b_an_unevaluable_report_shows_no_figures_at_all():
+    """I first asserted the opposite here - that the effective range must be PRINTED beside the
+    figures - and the render was right and the test was wrong.
+
+    Under UNEVALUABLE the report returns after saying why, without a single recomputed number. That
+    is correct: nothing was proved, so handing the reader figures to rank would be the exact misuse
+    the ranking rule in CLAUDE.md describes. `effective_to` stays as data for --json, and the
+    truncation message names the sequence the ledger stops at."""
+    entries = gledger(DISCONNECT_DAY)
+    rep = verify_certificate(make_cert(entries), entries[:-3])
+    out = rep.render()
+
+    assert rep.exit_code == EXIT_UNEVALUABLE
+    assert "LEDGER_TRUNCATED" in out
+    assert "stops at seq" in out          # deliberately not via `effective_to`: this test is about
+                                          # PRESERVED behaviour and must run against the old code
+    for figure in ("limitRespected", "lockoutsTriggered", "claims over", "REACHED"):
+        assert figure not in out, f"{figure} was shown under an unevaluable verdict"
+
+
+def test_def6b_a_complete_ledger_still_compares_everything():
+    """CONTROL. The skip must be reachable ONLY through truncation.
+
+    Free of any reference to `effective_to`: a control for preserved behaviour that touches a name
+    the old code lacks cannot run against it, and then it measures nothing. Fourth time today."""
+    entries = gledger(DISCONNECT_DAY)
+    rep = verify_certificate(make_cert(entries), entries)
+    assert "CLAIMS_NOT_COMPARABLE" not in {f.code for f in rep.unverified}
+    assert rep.exit_code == EXIT_OK
+
+
+def test_def6b_a_real_lie_on_a_complete_ledger_is_still_charged():
+    """CONTROL that must survive: teaching it to stop comparing a SHORT file must not teach it to
+    stop comparing a whole one."""
+    entries = gledger(BREACH_DAY)
+    liar = make_cert(entries, overrides={"claims.limitRespected": True})
+    rep = verify_certificate(liar, entries)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CLAIM_MISMATCH" in codes(rep)
+
+
+def test_def6b_tampering_is_still_caught_on_a_short_file():
+    """CONTROL. Truncation excuses a difference in the CLAIMS; it never excuses a broken link."""
+    entries = gledger(DISCONNECT_DAY)
+    cert = make_cert(entries)
+    both = [dict(e) for e in entries[:-2]]
+    both[3] = dict(both[3])
+    both[3]["payload"] = {**both[3].get("payload", {}), "planted": True}
+
+    rep = verify_certificate(cert, both)
+    assert rep.exit_code == EXIT_CONTRADICTED
+    assert "CHAIN_BROKEN" in codes(rep)
+
+
 def test_the_verifier_can_actually_refuse():
     """The meta-guarantee of SPEC section 5: a verifier that only says OK is a rubber stamp.
     Every attack here must be REFUSED - never exit 0 - and must name what it found.
