@@ -344,3 +344,52 @@ matter:
 ## Friction
 
 None. Nothing was fixed during the run.
+
+---
+
+# Run 5 - 2026-09-03 (deadman-kit 0.3.0, AFTER publishing) - and what it found
+
+The debt run 4 wrote down, paid the same day: the published wheel was downloaded from the simple
+index and the 22 checks were run **against it**. All 22 held, including the four that this release
+exists for - `CERT_SPEC.md` inside the package, `--spec` resolving inside the venv, a certificate
+missing `ledgerDialect` exiting **1**, and `chainOk` **omitted** on a run that never reached it.
+Publication confirmed by the two paths `RELEASING.md` allows and never by the bare `/json`.
+
+## The finding: the local wheel and the published one are not the same bytes
+
+**13 members differ.** That is the sentence that mattered, and the cause is not what it sounds
+like. Measured before being named:
+
+| | |
+|---|---|
+| members differing | 13 |
+| of those, differing ONLY in line endings | **12** |
+| the 13th | `RECORD`, which stores the hashes of the other members |
+| every published module equals | the git **blob** |
+| every local module equals | the working-copy **disk** |
+
+**Nothing transforms anything.** CI builds from a fresh checkout, which materialises the blobs;
+this machine builds from a working copy whose endings drifted from those blobs on 17 files under
+`core.autocrlf`. Same content, different bytes, and `METADATA` follows because it embeds a
+description read from a file in the same state.
+
+**The conclusion survives the benign cause, and it is why the default changed.** A cold check on a
+locally built wheel compares a copy against the repository that produced it - two views of one
+source, agreeing with themselves. It *cannot fail* for the only cause that matters: a difference
+between what we built and what anyone installs. It never could, and every previous "verified"
+before an upload had that hole in it.
+
+So `scripts/coldstart_check.py` now **downloads the published wheel by default** and verifies that.
+`--local` remains, because before a release there is nothing published and stopping a bad artefact
+is worth doing - but it is a **pre-flight, not a verification**, it must be asked for by name, and
+it prints a banner saying so rather than trusting the reader to remember which mode they ran. A
+bare path is refused for the same reason.
+
+It also compares the two wheels, **split by cause**: a CONTENT difference fails loudly, an
+endings-only difference is a NOTE with its explanation. Collapsing the two would make the check
+permanently red on this machine, and a check that is always red is a check that gets turned off.
+
+## Friction
+
+None, and nothing was fixed during the run. The finding above was measured, not repaired: the 17
+files are untouched by decision.
