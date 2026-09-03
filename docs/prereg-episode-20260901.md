@@ -106,5 +106,55 @@ aparece o no en un texto que ya está escrito.
 
 ---
 
+---
+
+## ENMIENDA 2 — 2026-09-02, todavía antes de escribir el contenido
+
+**Nada de lo sellado se toca.** Se agrega debajo, fechada y en su propio commit, como la ENMIENDA 1.
+
+### El autor queda fallado: lo escribo yo, sabiendo la respuesta
+
+§2 dejaba tres salidas y recomendaba la (2) —otro campo cuya respuesta el operador conociera y yo
+no—. **El operador falla por la (3), y con el argumento correcto:**
+
+> **La asimetría se sostiene.** Un autor que sabe la respuesta **no puede** producir un positivo
+> válido, pero **sí puede** producir un **negativo válido**. Si la escribo sabiéndola y **aun así**
+> la atribución por adyacencia no aparece, el método se murió ahí — barato, y en el caso más fácil
+> posible.
+
+La (2) además **no estaba disponible**: no hay ningún defecto medido en otro campo cuya respuesta
+él conozca y yo no. Lo que se pierde queda dicho, no descontado: **este ejercicio puede matar el
+método y no puede consagrarlo.**
+
+### Y hay que declarar algo que supe DESPUÉS del sello y ANTES del contenido
+
+El 2026-09-02, al fallar la cola, el operador me pasó un hecho que **no salió de este repositorio**
+y que no tenía cuando se selló §3:
+
+> El **26-ago el guardián intentó aplanar 167 veces y nadie contestó**. Disparó, fue correcto, y no
+> cambió nada. **Un freno desoído es, en resultado, un freno que no disparó.**
+
+**Se declara acá porque el sello no sirve si lo que entra a la cabeza del autor entre el sello y el
+contenido queda sin registrar.** Concretamente, esto acota la cláusula C:
+
+> **Si la definición del consumidor hace aparecer «el registro de un intento no es el registro de
+> un resultado», eso NO cuenta como hallazgo adicional bajo C.** Me lo dijeron antes de escribir.
+> Cuenta como parte de lo que ya sabía, igual que la adyacencia.
+
+Es exactamente lo que la ENMIENDA 1 le hizo a C —etiquetarla en vez de creerle— aplicado a un
+segundo insumo. **La lista de lo que sabía de antemano se escribe antes, no se recuerda después.**
+
+Lo que sabía al empezar el contenido, completo:
+
+1. La atribución por adyacencia de `triggerEvent` (medida por mí el 1-sep).
+2. El cajón de sastre de `reasons`, y que un evento cualquiera durante un episodio entra ahí.
+3. Que `limitRespected` colapsa «no pude ver» con «incumplió» (DEF-7).
+4. Que un episodio abierto al final del rango es alcanzable y dura (1 h 01 m medido).
+5. **Los 167 aplanados desoídos del 26-ago** — reportado, no medido por mí.
+
+**Cualquier cosa de esas cinco que aparezca en la definición no es descubrimiento.**
+
+---
+
 *Relacionado: `docs/ledger-extension-rule.md` §5.11 (dos implementaciones que adivinaron igual no
 se corroboran), §6.2 (la pregunta generadora), §6.2b (este ejercicio como control del método).*
