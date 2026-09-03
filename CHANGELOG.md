@@ -9,6 +9,71 @@ visible with its reason), then builds sdist + wheel with `python -m build`, inst
 then publishes to PyPI with `pypa/gh-action-pypi-publish` under **trusted publishing** (environment
 `release`, `id-token: write`, no API tokens in secrets). Workflow: `.github/workflows/release.yml`. The human half - what to check before tagging, and how to confirm a release really landed without being fooled by PyPI's cached `/json` endpoint or pip's cached index - is in [`docs/RELEASING.md`](https://github.com/Roberto9210/deadman/blob/main/docs/RELEASING.md).
 
+## 0.3.0 - 2026-09-03
+
+**Why a minor bump and not a patch.** Two contracts changed: the shape of `--json` and the meaning
+of the exit codes. Both were measured for consumers before being touched, and both have none we
+can find - zero outside this repository's own assertions. The version was raised anyway, because a
+version number is an affirmation about compatibility, not a report of how much happened to break.
+Shipping an exit-code change as `0.2.3` would make that affirmation false for anyone who arrives
+later. 451 tests, 1 skipped.
+
+- **`certHash` and `trustLevel` are now computed before anything can return early.** This is the
+  one place where a MUST already published in `CERT_SPEC.md` was contradicted by the code that
+  cites it: section A.2 says a verifier MUST recompute `certHash` on any path that reaches a
+  verdict, and five reachable paths reached a verdict without doing it. A document that stops the
+  verifier early - a missing dialect, a missing range - was therefore also a document whose own
+  hash was never checked, which is the wrong way round: the cheaper, purely-local check is the one
+  an adversary most wants skipped. It now runs first, and `CERTHASH_MISSING` is separated from
+  `CERTHASH_MISMATCH` so that "you did not give me one" stops being reported as "yours is wrong".
+- **Two refusals moved from exit 2 to exit 1, and the rule that sorts them is now written down.**
+  `DIALECT_MISSING` and `RANGE_MISSING` were being reported as *I could not look* when they are
+  *I caught you lying*: both fields are mandatory, and the question that decides every case is
+  whether a fully conforming certificate could produce this condition. If yes, it is 2 and the
+  remedy is to ask for a better copy; if no, the document itself is the defect and a better copy
+  will never arrive. `DIALECT_UNKNOWN` and `DIALECT_MISMATCH` stay at 2 for exactly that reason
+  and are commented so nobody "fixes" them to match. The rule is section A.5 of `CERT_SPEC.md`,
+  now normative.
+- **A contradiction outranks an unevaluable.** When both are present the exit code is 1. Measuring
+  something and finding it false is not undone by failing to measure something else - and without
+  this, a certificate that had been caught could still buy a 2 by also being unreadable somewhere
+  else, which is a strategy rather than an accident.
+- **`--json` no longer publishes the result of a check that did not run.** `chainOk`,
+  `certHashOk` and `signature` are OMITTED when the verifier stopped before reaching them, rather
+  than carrying a default. They were emitting `false`, `false` and `"ABSENT"` - which a consumer
+  reads as *the chain is broken, the hash is wrong, there is no signature* when the truth was that
+  none of the three had been looked at. Omission rather than `null` is deliberate and follows the
+  document's own section 4.1: `null` is falsy in every language that would consume this, so it
+  would preserve the exact false reading being removed. `--json` also gained `spec`, naming the
+  document version the run was judged against.
+- **`CERT_SPEC.md` now travels inside the wheel, and the tool can say where it is.** The document
+  the source has cited since it was written lived only in the repository, so a reader who
+  installed from PyPI and followed the citation arrived nowhere. It is packaged, `--spec` prints
+  its path on disk without needing files or a network, and a test opens the built wheel and
+  compares the packaged copy against the repository's byte for byte. That test also settled a
+  claim this project had been making since 0.2.1: the `[tool.setuptools.package-data]` block was
+  inert. The wheel is identical with it, without its entry, and without the block. What fixed the
+  examples gap back then was moving them inside the package, not the globs, and the comment
+  crediting the globs has been corrected rather than quietly deleted.
+- **Every requirement in `CERT_SPEC.md` was audited against the suite, and six were demoted from
+  normative to descriptive.** The rule applied was one line - a MUST that no test sustains is not
+  published as a MUST - and nothing was deleted: each demoted paragraph still describes what this
+  verifier does, and each says what would return it to normative. Two of the six came back the
+  same day, when the tests that sustain them arrived with the exit-code work. Section 9 carries
+  the table, including the single requirement left normative with no test and the reason it is
+  un-testable from here rather than merely untested.
+- **Seven citations in the shipped source pointed at documents that do not exist**, or at sections
+  of the wrong one. All seven now resolve, and the sweep that finds them declares what shape of
+  citation it can and cannot see, because the seventh was a relative markdown link the original
+  pattern was blind to.
+
+Internal, and not part of the distribution: a `scripts/replace.py` that makes the safe way to edit
+a file shorter than the unsafe one, after a `sed -i` mangled a line here; `scripts/check_against_old.py`
+extended so the checking tools can finally be controlled against their own previous versions; and
+a declared, verified escape hatch in the line-endings guard, which caught a real regression in this
+release. A repair can be declared and the declaration is checked against the file's own history -
+you can back out of a normalisation, you cannot declare your way into one.
+
 ## 0.2.2 - 2026-08-22
 
 **An audit of our own promises.** The certificate verifier met real production data for the first

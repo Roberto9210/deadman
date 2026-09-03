@@ -49,6 +49,20 @@ def _declared_version() -> str:
     return m.group(1)
 
 
+def test_the_package_reports_the_version_the_project_declares():
+    """`_declared_version()` above was written and never called, so nothing tied the number a
+    user sees at runtime to the number that gets uploaded. The release workflow checks the TAG
+    against `pyproject.toml` and stops there, which means `__version__` could name any release at
+    all and every gate would still be green - the installed package answering one version while
+    the index served another. This is the missing side of that check."""
+    from deadman import __version__
+
+    assert __version__ == _declared_version(), (
+        f"deadman.__version__ is {__version__!r} but pyproject.toml declares "
+        f"{_declared_version()!r}. Whichever is wrong, a published artefact would misreport "
+        f"itself to everyone who asked it directly.")
+
+
 def _declared_extras() -> set[str]:
     """Parsed without tomllib: this suite runs on 3.10, where it does not exist."""
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

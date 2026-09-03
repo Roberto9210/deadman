@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deadman-kit"          # PyPI distribution name ("deadman" is taken); the import stays `deadman`
-version = "0.2.2"
+version = "0.3.0"
 description = "Execution-safety primitives for automated trading systems: kill switch, persistent entry halt, units contract, honest post-fill state machine, hash-chained ledger anchorable to a third party by a publisher you supply. Zero runtime dependencies."
 readme = "README.md"
 # Floor 3.10, and why: PEP 604 unions (`X | None`) are used at runtime in

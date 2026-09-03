@@ -15,7 +15,7 @@ from .broker import BrokerPort, Order, BrokerRejected, ORDER_STATUSES
 from .executor import HonestExecutor, ExecResult, ReconcileReport, client_order_id_for
 from . import errors
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"
 __all__ = ["Clock", "SystemClock", "FakeClock", "Paths", "Verdict", "StateFile", "WriterIdentity", "Seal",
            "Ledger", "SignedLedger", "Entry", "Anchor", "VerifyReport", "KINDS", "GENESIS_HASH", "ANCHOR_AFTER", "EntryHalt", "HaltRecord",
            "KillSwitch", "Intent", "Resolved", "resolve_units", "PositionSnapshot", "ExposurePredicate",
