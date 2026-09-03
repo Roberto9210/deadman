@@ -24,14 +24,19 @@ A certificate is **a machine's signed assertion about a record that machine kept
 from a hash-chained ledger and states, over a declared range of that ledger, what the guardian
 observed.
 
-**NORMATIVE.** A certificate MUST NOT be presented as, and a conforming verifier MUST NOT report it
-as, any of the following. These four are the limitations of §2 and exist because each is a
-conclusion a reader reaches unaided:
+**DESCRIPTIVE** (demoted from normative 2026-09-03 — see §9). A certificate is not, and this
+verifier does not report it as, any of the following. These four are the limitations of §2, and
+each exists because it is a conclusion a reader reaches unaided:
 
 - a record of profitability,
 - a statement that the trader did not trade elsewhere,
 - a statement that the software was not bypassed before it started,
 - an audit of the trader.
+
+This is the paragraph whose demotion costs the most, and it is said plainly rather than buried:
+nothing in the suite asserts that a verdict never contains a profitability figure. The behaviour
+is correct today because the verifier never computes one, and **absence of a feature is not an
+implementation**. It returns to NORMATIVE the day one test says so.
 
 ## 2. The limitations, carried verbatim (guarantee C10)
 
@@ -79,8 +84,13 @@ not survive recomputation is refused exactly as an unsigned one is.
 
 ## 4. The document
 
-**NORMATIVE.** A certificate MUST declare `ledgerDialect` (§A.1), `claims.ledgerRange` with integer
-`fromSeq <= toSeq`, `trustLevel`, `limitations` (§2), and `certHash`.
+**NORMATIVE.** A certificate MUST declare `ledgerDialect` (§A.1) and `limitations` (§2). A
+verifier refuses a certificate that omits either.
+
+**DESCRIPTIVE** (the same sentence, split 2026-09-03 — see §9). A certificate is also expected to
+declare `claims.ledgerRange` with integer `fromSeq <= toSeq`, `trustLevel`, and `certHash`, and
+this verifier refuses one that does not. The three are held back from normative only because no
+test yet fixes that refusal: the requirement is not weaker, the evidence for it is.
 
 **NORMATIVE, `certHash`.** `certHash` is the SHA-256 of the canonical JSON of the document **without
 `certHash` and without `signature`**. The second exclusion is forced rather than chosen: the
@@ -100,8 +110,12 @@ because it also hands out confidence. See rule 1 and rule 5.
 ### 4.3 No individual trades, no personal data
 
 **NORMATIVE.** A v1 certificate exports aggregates and guardian events only. It MUST NOT contain
-`fillPrice`, `executionId`, `orderId` or `quantity`, and MUST NOT name accounts — accounts appear
-as salted hashes.
+`fillPrice`, `executionId`, `orderId` or `quantity`.
+
+**DESCRIPTIVE** (split from the sentence above, 2026-09-03 — see §9). Accounts appear as salted
+hashes and are not named. There is no check for this and no test: unlike the four field names
+above, "names an account" is not a lexical property a sweep can decide, and a requirement whose
+verification nobody has designed is a requirement nobody is enforcing.
 
 ---
 
@@ -187,16 +201,25 @@ chosen. Until it does, `signature.keyId` and `issuer.keyId` are unverified by de
 **NORMATIVE.** 1 and 2 are kept apart. *I caught you lying* and *I could not look* are different
 facts, and a tool that collapses them can be disabled by handing it a broken file — or, pointed the
 other way, can be made to accuse an honest holder who supplied the wrong file. **A verifier MUST NOT
-return 1 for a condition it did not measure.** Scripts MUST treat 2 as *ask for a better copy*,
-never as a pass.
+return 1 for a condition it did not measure.**
+
+**GUIDANCE FOR CONSUMERS, not a conformance requirement** (relabelled 2026-09-03 — see §9). A
+script that consumes these codes should treat 2 as *ask for a better copy*, never as a pass. It is
+written here because it is the whole point of separating 2 from 0, and it is not NORMATIVE because
+this specification binds verifiers, and no test of a verifier can observe what its callers do.
 
 ---
 
 ## 5. What a verifier must say about its own limits
 
-**NORMATIVE.** On every run, including success, a verifier MUST report: that trading elsewhere is
-invisible to the document; that removing the add-on before start leaves a gap rather than an act;
-and, when no third-party anchor was supplied, that nothing proves the ledger existed before now.
+**NORMATIVE.** When no third-party anchor was supplied, a verifier MUST report, including on
+success, that nothing proves the ledger existed before now.
+
+**DESCRIPTIVE** (split from the sentence above, 2026-09-03 — see §9). On every run this verifier
+also reports that trading elsewhere is invisible to the document, and that removing the add-on
+before start leaves a gap rather than an act. Both are emitted today and neither is pinned by a
+test, which is the exact shape this specification exists to distrust: a statement an artefact
+makes about itself, that nobody checks.
 
 **NORMATIVE.** When the ledger contains event types the verifier has no rule for, it MUST say so —
 naming each distinct type **once** — and MUST NOT refuse on that ground. An unknown event type means
@@ -240,7 +263,32 @@ applied to:
 ## 9. Held back from normative, on purpose
 
 These are things this verifier does today that this document **does not yet bind**. They are listed
-so the gap is a decision and not an omission:
+so the gap is a decision and not an omission.
+
+### 9.1 Demoted on 2026-09-03, after auditing every requirement against the suite
+
+The rule applied was one line: **a MUST that no test sustains is not published as a MUST.** Nothing
+was deleted — each one below still describes what the verifier does, and each says what would
+return it to normative. The audit ran because a specification was about to be published, and
+writing new public claims while correcting old ones is how the old ones got there.
+
+| demoted | why it has no test | what re-promotes it |
+|---|---|---|
+| **§1**, the four "this is not" | the behaviour is correct because the verifier never computes a profitability figure; **absence of a feature is not an implementation** | one test asserting no verdict carries such a figure |
+| **§4**, `ledgerRange` / `trustLevel` / `certHash` **being declared** | the refusals exist in code and nothing pins them; note that `certHash`'s *computation* is normative and tested — its *presence* is what was untested | a test per field that omits it and asserts the refusal |
+| **§4.3**, accounts appear as hashes | "names an account" is not a lexical property a sweep can decide, so no check was ever designed | a decidable definition first, then a check |
+| **§5**, trading elsewhere / bypass before start | both are emitted on every run and neither is asserted anywhere | one test reading a successful run's output |
+| **§A.5**, what scripts must do with 2 | it binds a **caller**, and no test of a verifier can observe its callers | nothing — it is guidance, correctly labelled |
+
+### 9.2 Normative without a test, deliberately — one, and its reason
+
+**§2, ordering**: a new required limitation must be emitted by producers before a verifier requires
+it. It stays NORMATIVE with no test because it is not un-tested, it is **un-testable from here**:
+no test run can observe another repository's release order. Its violation is also the least silent
+failure this system has — every certificate already issued starts being refused at once. It is the
+only case where "no test" does not mean "no detection".
+
+### 9.3 Still open, by design
 
 - **Which fields carry a promise** (§8). Today the set is declared in the verifier. It is not
   normative because the certificate schema is still moving, and freezing the list would freeze the
