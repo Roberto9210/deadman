@@ -58,6 +58,13 @@ EXIT_UNEVALUABLE = 2
 #: resolve from the PyPI project page.
 REPO_EXAMPLES = "https://github.com/Roberto9210/deadman/tree/main/deadman/examples/certificate"
 
+#: The specification this file implements, and where a reader can get it. This file cites
+#: CERT_SPEC fifteen times; until 2026-09-03 nothing in it said what CERT_SPEC was or where to
+#: find it, and the document was not even inside the package. Fifteen unresolvable citations were
+#: not fixed one by one - what fixes the class is the tool being able to answer the question.
+SPEC_VERSION = "CERT_SPEC v0.2"
+SPEC_URL = "https://github.com/Roberto9210/deadman/blob/main/deadman/docs/CERT_SPEC.md"
+
 
 def canonical_json(obj: Mapping[str, Any]) -> bytes:
     """The one canonicalisation both ledger dialects share: ordinal-sorted keys, no
@@ -1840,6 +1847,51 @@ def _run_example() -> int:
     return rep.exit_code
 
 
+def _spec_path() -> Optional[Path]:
+    """The specification as installed, or None when it is not there.
+
+    Returning None rather than raising is the point: a package built without the document is a
+    packaging defect, and the tool should SAY so rather than crash on a reader who asked a
+    reasonable question. tests/test_wheel_contents.py is what stops that from happening quietly.
+    """
+    p = Path(__file__).resolve().parent / "docs" / "CERT_SPEC.md"
+    return p if p.is_file() else None
+
+
+def _run_spec() -> int:
+    """Answer "where is the specification for this thing" without needing a network."""
+    print(SPEC_VERSION)
+    print()
+    path = _spec_path()
+    if path is None:
+        print("NOT FOUND in this installation. It should be at:")
+        print(f"    {Path(__file__).resolve().parent / 'docs' / 'CERT_SPEC.md'}")
+        print("That is a packaging fault, not something you did. Read it online meanwhile:")
+        print(f"    {SPEC_URL}")
+        return EXIT_UNEVALUABLE
+
+    # The document's own title line is NOT echoed: it carries an em dash, and this CLI is
+    # ascii-safe on purpose because a cp1252 Windows console is the machine a stranger runs it on
+    # (test_c18_the_cli_output_is_ascii_safe). The line is used for a CHECK instead - whether the
+    # shipped document declares the version this code claims to implement - which is worth more
+    # than echoing it. Code and document drifting apart is exactly what `--spec` must not hide.
+    head = path.read_text(encoding="utf-8").split("\n", 1)[0]
+    print("Shipped with this package, so it is readable offline and matches THIS version:")
+    print(f"    {path}")
+    if SPEC_VERSION not in head:
+        print(f"    WARNING: that file does not declare {SPEC_VERSION}. The code and the document")
+        print("    have drifted apart, and the document is the one to believe.")
+    print()
+    print("Online, and the same document:")
+    print(f"    {SPEC_URL}")
+    print()
+    print("What it covers: the certificate and the verifier that judges it. NORMATIVE statements")
+    print("bind a conforming verifier; DESCRIPTIVE ones only report what this one does today, and")
+    print("its last section lists what is deliberately not yet binding.")
+    print("The guardian that EMITS a certificate has its own specification, in its own repository.")
+    return EXIT_OK
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(
         prog="python -m deadman.verify_certificate",
@@ -1849,7 +1901,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                "survive an attacker with disk access; L2 adds a third party's anchor, so the "
                "record is dated by someone other than the trader; L3 adds the issuer's "
                "signature, which proves origin and never truth.\n"
-               "Exit codes: 0 = verified, 1 = contradicted, 2 = could not evaluate.",
+               "Exit codes: 0 = verified, 1 = contradicted, 2 = could not evaluate.\n"
+               "Specification: this verifier implements CERT_SPEC, which ships inside the "
+               "package. Run --spec to see where.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("certificate", type=Path, nargs="?",
@@ -1868,8 +1922,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--example", action="store_true",
                    help="verify the example certificate that ships with this package and exit; "
                         "needs no files, no download and no network")
+    p.add_argument("--spec", action="store_true",
+                   help="print the specification this verifier implements, and where to read it; "
+                        "needs no files and no network")
     p.add_argument("--json", action="store_true", help="machine-readable output")
     args = p.parse_args(argv)
+
+    if args.spec:
+        return _run_spec()
 
     if args.example:
         return _run_example()
@@ -1961,6 +2021,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # pass, and if not, why" on any path. `reachedLevel` stays null on purpose - null there
         # is the MEASURED answer, not an absence: no layer was reached.
         payload = {
+            # Named in the machine-readable output too: a consumer that stores a verdict should be
+            # able to record WHICH RULES produced it, or the record cannot be re-read later.
+            "spec": SPEC_VERSION,
             "result": ["VERIFIED", "CONTRADICTED", "UNEVALUABLE"][rep.exit_code],
             "declaredLevel": rep.declared_level, "reachedLevel": rep.reached_level,
             "anchorsChecked": rep.anchors_checked, "coveredUpToSeq": rep.covered_up_to_seq,

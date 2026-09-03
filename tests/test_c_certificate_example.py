@@ -235,6 +235,22 @@ def test_the_missing_ledger_message_says_what_to_do(tmp_path):
 
 
 def test_help_cites_no_specification_identifiers_a_reader_cannot_look_up():
+    """NOTE ADDED 2026-09-03 - the assertions are unchanged, the PREMISE is not.
+
+    This test was written when no specification document existed anywhere, so `C12` and `C13` in
+    the help text were identifiers pointing at nothing and deleting them was the honest fix. That
+    premise ended today: CERT_SPEC ships inside the package and `--spec` prints its path.
+
+    It is NOT loosened, and the reason is that `C12`/`C13` remain unresolvable FROM THE HELP TEXT -
+    a bare guarantee number still tells a reader nothing about where to look. What changed is that
+    the answer now exists, so the right way to satisfy a future reader is to name the document
+    (which `--spec` and the epilog do) rather than to name a guarantee.
+
+    The note is here rather than in a commit message because whoever eventually decides this test
+    is obsolete will be reading THIS FILE, and would otherwise delete it believing its premise
+    still held. If the day comes that the help text can cite something a reader can look up, this
+    test should be REPLACED by one asserting that citations resolve - not simply removed.
+    """
     r = subprocess.run([sys.executable, "-m", "deadman.verify_certificate", "--help"],
                        capture_output=True, text=True, cwd=str(ROOT), env=_subprocess_env())
     assert r.returncode == 0
