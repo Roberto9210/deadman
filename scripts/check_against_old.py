@@ -22,6 +22,16 @@ this package is installed EDITABLE, and an editable install puts a finder on `sy
 resolves the name `deadman` to this directory BEFORE `sys.path` is consulted. `PYTHONPATH` cannot
 shadow it - measured, not assumed. (The same install once hid a CI failure here; see `git log`.)
 
+THAT ARGUMENT IS ABOUT RESOLVING THE NAME `deadman`, AND `scripts/` IS NEVER IMPORTED - the tests
+invoke those files by absolute path as a subprocess, so there is no module resolution to fool, and
+the in-place swap is simply what a change under `scripts/` needs. Both directories are searched,
+because the checking tools need controls for the same reason the package does: two of them grew
+behaviour this week that a test asserts, and until now neither could be run against its old self.
+
+The `.bak` names are flat, so a name present in BOTH directories is ambiguous. That is REFUSED by
+name rather than settled by a precedence rule, because a precedence rule would silently swap the
+file nobody meant and the run would look like it held.
+
 So the swap is in place, and made safe by verifying the restore: every file's sha256 is recorded
 before and checked after, and a failed restore is shouted rather than returned.
 
@@ -44,9 +54,44 @@ ROOT = Path(__file__).resolve().parents[1]
 
 HOLDS, DIFFERENT, DID_NOT_RUN = 0, 1, 2
 
+#: Where a `<name>.bak` may correspond to a real file, searched in this order but NOT as a
+#: precedence: a name found in more than one of these is refused, not resolved.
+SEARCH_ROOTS = (ROOT / "deadman", ROOT / "scripts")
+
 
 def _sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def _shown(p: Path) -> str:
+    try:
+        return str(p.relative_to(ROOT))
+    except ValueError:
+        return str(p)
+
+
+def resolve_targets(baks: list[Path]) -> dict[Path, Path]:
+    """Map each `<name>.bak` onto the real file it stands for, or refuse to guess.
+
+    Kept out of main() so the property can be tested as itself rather than through a pytest run:
+    this function is the only part that knows about the directories, so pointing SEARCH_ROOTS at
+    two temporary ones IS the test, and no file in the repository is swapped to run it.
+    """
+    targets: dict[Path, Path] = {}
+    for bak in baks:
+        name = bak.name[: -len(".bak")]
+        found = [root / name for root in SEARCH_ROOTS if (root / name).is_file()]
+        if not found:
+            where = " or ".join(f"{r.name}/" for r in SEARCH_ROOTS)
+            raise SystemExit(f"{bak.name} does not correspond to a file in {where}")
+        if len(found) > 1:
+            listed = ", ".join(_shown(p) for p in found)
+            raise SystemExit(
+                f"AMBIGUOUS: {bak.name} could be {listed}. The backup names are flat, so this "
+                f"cannot be settled from the backup alone, and guessing would swap the file "
+                f"nobody meant. Keep one of them per backup directory.")
+        targets[found[0]] = bak
+    return targets
 
 
 def run_pytest(tests: str, selector: str) -> str:
@@ -95,12 +140,7 @@ def main(argv=None) -> int:
     if not baks:
         raise SystemExit(f"no .bak files in {backup}")
 
-    targets = {}
-    for bak in baks:
-        t = ROOT / "deadman" / bak.name[: -len(".bak")]
-        if not t.exists():
-            raise SystemExit(f"{bak.name} does not correspond to a file in deadman/")
-        targets[t] = bak
+    targets = resolve_targets(baks)
 
     with tempfile.TemporaryDirectory() as td:
         keep = {t: (Path(td) / t.name, _sha(t)) for t in targets}
