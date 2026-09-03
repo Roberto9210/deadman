@@ -5,3 +5,8 @@ dist/
 build/
 *.egg-info/
 .venv/
+
+# `scripts/replace.py` writes a timestamped copy of every file it touches here before touching it,
+# and `scripts/check_against_old.py` reads its .bak files from here. They are working copies of
+# tracked files: useful for an hour, noise in a diff, and never the source of truth.
+backups/

@@ -210,11 +210,25 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--new", help="replacement; same restriction")
     ap.add_argument("--batch", type=Path, help="a file of @@FILE/@@OLD/@@NEW/@@END blocks")
     ap.add_argument("--sep", default="@@", help="batch directive marker (default @@)")
-    ap.add_argument("--backup-dir", type=Path, default=ROOT / "backups",
-                    help="where the .bak copies go; pass an empty value to skip")
+    ap.add_argument("--backup-dir", default=str(ROOT / "backups"),
+                    help="where the .bak copies go")
+    ap.add_argument("--no-backup", action="store_true",
+                    help="write no .bak copies at all")
     a = ap.parse_args(argv)
 
-    backup = a.backup_dir if str(a.backup_dir) else None
+    # NOT `if str(a.backup_dir)`. With `type=Path`, an empty `--backup-dir ""` became `Path("")`,
+    # whose `str()` is `"."` and therefore TRUTHY - so the escape hatch the help text advertised
+    # did the opposite of what it said and wrote the backups into the CURRENT DIRECTORY. It
+    # littered this repository's root the first day the tool was used in anger. No test caught it
+    # because every test redirected the backups somewhere harmless instead of turning them off,
+    # so the one documented path was the one path never exercised.
+    if a.no_backup:
+        backup = None
+    elif not a.backup_dir.strip():
+        _refuse("--backup-dir is empty, and an empty path is not a way of saying 'nowhere'.",
+                "If you meant to write no backups at all, pass --no-backup.")
+    else:
+        backup = Path(a.backup_dir)
 
     if a.batch:
         if a.file or a.old or a.new:

@@ -275,3 +275,40 @@ def test_the_tool_reports_failure_through_its_exit_code(sandbox):
     f.write_bytes(b"x\n")
     assert run(f, "--old", "nope", "--new", "y", *nobackup(sandbox)).returncode == 1
     assert run("--batch", sandbox / "does-not-exist.txt", *nobackup(sandbox)).returncode != 0
+
+
+# ---------------------------------------------------------------- turning the backups OFF
+# Added after the fact: `nobackup()` above REDIRECTS the backups, it does not switch them off, so
+# the only way the help text offered to switch them off was the only way nothing ever ran. It did
+# not work, and it failed by writing files into the current directory.
+
+def test_no_backup_writes_no_backup_anywhere(sandbox, tmp_path, monkeypatch):
+    f = sandbox / "f.txt"
+    f.write_bytes(b"before\n")
+    cwd = tmp_path / "empty-cwd"                   # a stray backup would land HERE, visibly
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    r = run(f, "--old", "before", "--new", "after", "--no-backup")
+
+    assert r.returncode == 0, r.stderr
+    assert f.read_bytes() == b"after\n"
+    assert "backup:" not in r.stdout
+    assert list(cwd.iterdir()) == [], f"it wrote {list(cwd.iterdir())} into the cwd"
+
+
+def test_an_empty_backup_dir_is_refused_rather_than_reinterpreted(sandbox, tmp_path, monkeypatch):
+    """The defect exactly. An empty path used to mean `.`, so the documented way to skip backups
+    silently wrote them beside whatever the caller happened to be standing in."""
+    f = sandbox / "f.txt"
+    f.write_bytes(b"before\n")
+    cwd = tmp_path / "empty-cwd"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+
+    r = run(f, "--old", "before", "--new", "after", "--backup-dir", "")
+
+    assert r.returncode == 1
+    assert "--no-backup" in r.stderr, "the refusal has to name the thing that does work"
+    assert f.read_bytes() == b"before\n", "a refusal writes nothing"
+    assert list(cwd.iterdir()) == []
