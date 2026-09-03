@@ -34,7 +34,11 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+# `build` is a TEST dependency, not a packaging convenience: tests/test_wheel_contents.py
+# builds the wheel and opens it, because "it ships" has been true of this repository and
+# false of the package twice. A test that skipped when the backend was missing would
+# report nothing and read as a pass.
+test = ["pytest>=8", "build>=1"]
 # Optional, and ONLY for verifying a certificate's Ed25519 signature (L3). The base package
 # keeps zero runtime dependencies: `dependencies = []` above is unchanged, and the verifier
 # reaches this through importlib so the stdlib-only AST scan still passes. Without the extra
@@ -43,7 +47,12 @@ verify-sig = ["cryptography>=42"]
 
 [project.urls]
 Homepage = "https://github.com/Roberto9210/deadman"
+# Two specifications, and they are not the same document. `Specification` is the KIT's - the
+# primitives. `Certificate specification` covers the certificate and the verifier that judges
+# it. Until 2026-09-03 only the first was listed, so a reader looking for the certificate's
+# rules either found the wrong document or concluded there was none.
 Specification = "https://github.com/Roberto9210/deadman/blob/main/docs/SPEC.md"
+"Certificate specification" = "https://github.com/Roberto9210/deadman/blob/main/deadman/docs/CERT_SPEC.md"
 Changelog = "https://github.com/Roberto9210/deadman/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
@@ -51,12 +60,28 @@ include = ["deadman*"]
 exclude = ["tests*", "examples*"]
 
 [tool.setuptools.package-data]
-# The worked examples ship INSIDE the package on purpose. Until 0.2.1 they lived at the repo
-# root, the README said they "ship", and the wheel contained none of them - a reader who
-# installed from PyPI had nothing to run and a relative link that does not resolve there.
-# `python -m deadman.verify_certificate --example` reads these, so they are not decoration.
+# WHAT PUTS A FILE IN THE WHEEL IS ITS LOCATION, NOT THIS BLOCK. Measured 2026-09-03: the built
+# wheel is identical with this block, without the CERT_SPEC entry, and with the whole block
+# deleted - 29 entries and the same contents in all three. `include-package-data` is on by default
+# under pyproject.toml and picks these up because they sit under `deadman/`.
+#
+# The block is kept anyway, and the reason is honest rather than confident: that measurement used
+# ONE setuptools on ONE machine, and this project builds on three platforms. A declaration inert
+# here may not be inert everywhere, and removing it to tidy up would trade a proven-harmless line
+# for an unmeasured risk. What GUARANTEES the outcome is tests/test_wheel_contents.py, which
+# builds the wheel and opens it wherever CI runs.
+#
+# What the two entries are, and why they belong to the reader rather than to us:
+#   examples/  until 0.2.1 they lived at the repo ROOT, the README said they "ship", and the wheel
+#              contained none of them. What fixed it was MOVING THEM under `deadman/`; the globs
+#              added at the same time got the credit and did nothing.
+#   docs/      `verify_certificate.py` cites CERT_SPEC fifteen times and until 2026-09-03 the
+#              wheel had no `docs/` at all - writing the document closed the gap for someone with
+#              a git clone and closed nothing for the installer. Same defect, same fix.
+# `--example` and `--spec` read these files, so neither is decoration.
 deadman = ["py.typed", "examples/certificate/*.json", "examples/certificate/*.jsonl",
-           "examples/certificate/*.md", "examples/certificate/*.py"]
+           "examples/certificate/*.md", "examples/certificate/*.py",
+           "docs/CERT_SPEC.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
