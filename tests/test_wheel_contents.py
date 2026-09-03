@@ -14,6 +14,17 @@ NO CHEAP GREEN. Presence alone would pass for an empty file, so the packaged byt
 against the repository's, byte for byte. There is no edit that silences this test except shipping
 the document.
 
+AND THE DISK IS NOT THE REPOSITORY, which this file said until 2026-09-03 without noticing the
+difference. The wheel is BUILT FROM THE DISK, so comparing the packaged bytes against the disk
+compares two copies of one source: it cannot fail for the one cause we have since measured to
+exist here. 17 of 84 tracked files have a blob that is LF and a working copy that is CRLF - git
+normalised them on the way in under `core.autocrlf` and the two have disagreed silently ever
+since. `CERT_SPEC.md` is not one of them today; nothing in the old assertion would have said so.
+So the packaged bytes are compared against the BLOB as well, and the comparison is narrowed to
+the cause: if the two are the same document, they must be the same bytes. An ordinary uncommitted
+edit changes the content, so it does not trip this - only a byte difference with no content
+difference does, and that is exactly the divergence.
+
 WHY THIS FAILS INSTEAD OF SKIPPING when the build backend is missing: a check that skips when its
 tool is absent is a check that reports nothing and looks like a pass. `build` is declared in the
 `test` extra for exactly this reason, so the environment that runs the suite is the environment
@@ -72,6 +83,30 @@ def test_the_shipped_specification_is_the_one_in_the_repository(wheel):
     on_disk = (ROOT / "deadman" / "docs" / "CERT_SPEC.md").read_bytes()
     assert packaged == on_disk, "the packaged specification is not the one in the repository"
     assert b"CERT_SPEC" in packaged and len(packaged) > 1000, "the packaged file is not a document"
+
+
+def test_the_shipped_specification_is_also_the_one_git_serves(wheel):
+    """The assertion above compares the wheel with the disk the wheel was built from, so it can
+    only fail if `build` dropped bytes. This one compares it with what git actually stores, which
+    is what every reader of this repository sees and what any other checkout would produce."""
+    packaged = wheel.read("deadman/docs/CERT_SPEC.md")
+    blob = subprocess.run(["git", "show", "HEAD:deadman/docs/CERT_SPEC.md"],
+                          cwd=ROOT, capture_output=True).stdout
+    assert b"CERT_SPEC" in blob and len(blob) > 1000, (
+        "git did not hand back the stored document, so nothing below was compared - a test that "
+        "passes on an empty blob is the cheap green this file exists to refuse")
+
+    assert packaged == blob or _flat(packaged) != _flat(blob), (
+        "the packaged specification and the one git stores are the same document with different "
+        "bytes - the working copy and the blob have diverged, so what ships is not what any "
+        "other checkout would build. Do NOT rewrite the file to match: see scripts/"
+        "check_line_endings.py, which diagnoses this shape rather than prescribing the rewrite.")
+
+
+def _flat(blob: bytes) -> bytes:
+    """The document with its line endings taken out of the comparison, so that what remains is
+    content. Two blobs that are equal here and unequal raw differ ONLY in their endings."""
+    return blob.replace(b"\r\n", b"\n")
 
 
 def test_the_check_is_capable_of_failing(wheel):
