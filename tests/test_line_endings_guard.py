@@ -122,3 +122,61 @@ def test_the_real_repository_passes_its_own_guard():
     r = subprocess.run([sys.executable, str(CHECKER), "HEAD~1", "HEAD"],
                        cwd=ROOT, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout
+
+
+# ---------------------------------------------------------------- restoring, declared and checked
+
+def test_a_declared_restoration_that_is_true_is_allowed(repo):
+    """A REPAIR IS INDISTINGUISHABLE FROM A VIOLATION BY THIS MEASUREMENT, and that is not a flaw
+    in the measurement - undoing a normalisation IS a whole-file diff. Without a way to say so,
+    the only ways out of a broken commit are rewriting history or leaving the guard red forever.
+
+    So the escape hatch exists and it is NOT a rubber stamp: the declaration is CHECKED. The file's
+    endings after the change must match a profile that file actually had in its own history. You
+    cannot declare your way into a fresh normalisation, only back out of one.
+    """
+    commit(repo, "f.txt", b"a\r\nb\nc\r\n", "mixed, as it always was")
+    commit(repo, "f.txt", b"a\r\nb\r\nc\r\n", "an edit that normalised it by accident")
+    commit(repo, "f.txt", b"a\r\nb\nc\r\nd\n",
+           "Put it back\n\nLINE-ENDINGS-RESTORED: f.txt")
+
+    r = run_checker(repo, "HEAD~1", "HEAD")
+    assert r.returncode == 0, r.stdout
+
+
+def test_a_declared_restoration_that_is_false_is_still_refused(repo):
+    """THE HALF THAT MAKES IT A CHECK. Declaring a restoration to a profile the file never had is
+    a normalisation wearing the word 'restored', and it must fail - LOUDER than an undeclared one,
+    because someone made a claim."""
+    commit(repo, "f.txt", b"a\r\nb\r\nc\r\n", "CRLF from birth")
+    commit(repo, "f.txt", b"a\nb\nc\n", "Tidy up\n\nLINE-ENDINGS-RESTORED: f.txt")
+
+    r = run_checker(repo, "HEAD~1", "HEAD")
+    assert r.returncode == 1, r.stdout
+    assert "REJECTED" in r.stdout, r.stdout
+    assert "never had" in r.stdout, r.stdout
+
+
+def test_a_declaration_only_covers_the_file_it_names(repo):
+    """CONTROL. One repair must not license every file in the same commit."""
+    commit(repo, "f.txt", b"a\r\nb\nc\r\n", "mixed")
+    commit(repo, "g.txt", b"x\r\ny\r\n", "another file, CRLF")
+    commit(repo, "f.txt", b"a\r\nb\r\nc\r\n", "normalise f")
+    (repo / "f.txt").write_bytes(b"a\r\nb\nc\r\n")
+    (repo / "g.txt").write_bytes(b"x\ny\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "Put f back\n\nLINE-ENDINGS-RESTORED: f.txt")
+
+    r = run_checker(repo, "HEAD~1", "HEAD")
+    assert r.returncode == 1, r.stdout
+    assert "g.txt" in r.stdout
+    assert "REJECTED" not in r.stdout, "g.txt was never claimed; nothing to reject"
+
+
+def test_an_undeclared_repair_is_still_refused(repo):
+    """CONTROL THAT MUST NOT MOVE. The hatch opens only when someone says the word."""
+    commit(repo, "f.txt", b"a\r\nb\nc\r\n", "mixed")
+    commit(repo, "f.txt", b"a\r\nb\r\nc\r\n", "normalised by accident")
+    commit(repo, "f.txt", b"a\r\nb\nc\r\n", "put it back, saying nothing")
+
+    assert run_checker(repo, "HEAD~1", "HEAD").returncode == 1

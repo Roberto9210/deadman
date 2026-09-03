@@ -17,6 +17,18 @@ Usage:
 
 BASE defaults to the merge-base with origin/main, HEAD to the working tree's HEAD. Exit 1 if any
 changed file's line-ending profile changed; exit 0 otherwise.
+
+REPAIRING a file whose endings were normalised by accident is, by this measurement, identical to
+committing the damage: undoing a whole-file diff is a whole-file diff. Without a way to say so the
+only exits from a bad commit are rewriting history or leaving the guard red for good, and both are
+worse than the defect. So a commit may declare, in its message:
+
+    LINE-ENDINGS-RESTORED: path/to/file
+
+and it is NOT taken on trust. The declaration is honoured only when the file's endings after the
+change match a profile THAT FILE ACTUALLY HAD in its own history - you can back out of a
+normalisation, you cannot declare your way into one. A declaration that does not check out is
+reported as REJECTED, which is louder than saying nothing, because a claim was made.
 """
 from __future__ import annotations
 
@@ -53,23 +65,58 @@ def kind(p: tuple[int, int] | None) -> str | None:
     return "mixed" if (crlf and lf) else ("crlf" if crlf else "lf")
 
 
+def restoration_claims(head: str) -> set[str]:
+    """Paths the head commit says it is putting back."""
+    message = _run("log", "-1", "--format=%B", head).decode("utf-8", "replace")
+    claims = set()
+    for line in message.splitlines():
+        line = line.strip()
+        if line.upper().startswith("LINE-ENDINGS-RESTORED:"):
+            path = line.split(":", 1)[1].strip()
+            if path:
+                claims.add(path)
+    return claims
+
+
+def had_this_shape_before(path: str, head: str, want: str | None) -> bool:
+    """Did this file ever have these endings? Bounded to its own recent history, which is enough:
+    a restoration is undoing something, and the thing being undone is recent by definition."""
+    revs = _run("log", "-n", "30", "--format=%H", f"{head}~1", "--", path).decode().split()
+    return any(kind(profile(_run("show", f"{rev}:{path}"))) == want for rev in revs)
+
+
 def changed_files(base: str, head: str) -> list[str]:
     out = _run("diff", "--name-only", "--diff-filter=M", base, head)
     return [f for f in out.decode("utf-8", "replace").splitlines() if f.strip()]
 
 
 def check(base: str, head: str) -> list[str]:
+    claimed = restoration_claims(head)
     problems = []
     for path in changed_files(base, head):
         before = profile(_run("show", f"{base}:{path}"))
         after = profile(_run("show", f"{head}:{path}"))
         if kind(before) is None or kind(after) is None:
             continue
-        if kind(before) != kind(after):
+        if kind(before) == kind(after):
+            continue
+
+        if path in claimed:
+            if had_this_shape_before(path, head, kind(after)):
+                continue                 # a real repair: it is going back to what it was
             problems.append(
                 f"{path}\n"
                 f"      before: {describe(before)}\n"
-                f"      after:  {describe(after)}")
+                f"      after:  {describe(after)}\n"
+                f"      CLAIM REJECTED: the commit declares LINE-ENDINGS-RESTORED for this file,\n"
+                f"      but it never had these endings. A normalisation does not become a repair\n"
+                f"      by being called one.")
+            continue
+
+        problems.append(
+            f"{path}\n"
+            f"      before: {describe(before)}\n"
+            f"      after:  {describe(after)}")
     return problems
 
 
