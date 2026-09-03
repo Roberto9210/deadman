@@ -4,6 +4,39 @@
 # The sentence that used to sit here - "every blob in this repo is CRLF" - was false on the day
 # it was written, and it was the premise the freeze was argued from.
 #
+# CORRECTION NOTE, 2026-09-03 - the census above is not rewritten, it is annotated, because it
+# is dated and it is the record of what we believed. What it says about BLOBS is right. What it
+# implies about AUTHORS is not, and that is the half every reader takes away from a line that
+# opens "line endings here are MIXED, and that is the measured state".
+#
+# It counted stored blobs and concluded about what people wrote. Those are the same population
+# only while nothing converts in between, and `core.autocrlf=true` was converting: it normalises
+# CRLF to LF on the way IN, so a file written CRLF is stored LF and the working copy and the blob
+# disagree in silence. `* -text` stops git converting from that point on; it does not undo what
+# was already stored, and nothing surfaces the disagreement until the file is next committed.
+#
+# Recounted today, 84 tracked text files, with the LF blobs split by WHY they are LF:
+#
+#     blob CRLF                                  40
+#     blob MIXED                                  4
+#     blob LF                                    40
+#         of those, working copy is CRLF         17   <- LF because git converted it
+#         of those, working copy is LF           23   <- LF because somebody wrote it that way
+#
+# So the repository is less authored-mixed than the census reads: 17 of the 40 LF blobs are an
+# artefact of a setting, not a choice anybody made. The specific claim about
+# `deadman/verify_certificate.py` being LF entirely still holds - it is LF in the blob AND on
+# disk, and it is not one of the 17.
+#
+# Two things follow, and neither is "normalise now".
+#   - The three reasons below still hold. Nothing here argues for uniformity; the count moved,
+#     the argument did not. Normalising remains closed.
+#   - The 17 are a queue, not a defect: each will look like an ending change the first time it is
+#     committed, because that is when the working bytes finally reach the blob.
+#     scripts/check_line_endings.py names that shape as a diagnosis and deliberately WITHHOLDS
+#     its ordinary remedy there - "rewrite it keeping its own endings" would rewrite every line
+#     of a file nobody touched, which is the damage this whole mechanism exists to prevent.
+#
 # What `* -text` does, and it still holds: it stops GIT converting in either direction, so an
 # edit that KEEPS a file's own endings does not rewrite it or move its blame. It promises
 # nothing more - in particular it does NOT stop an EDITOR from writing a file back with other
