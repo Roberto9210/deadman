@@ -116,7 +116,17 @@ anterior y ninguna que nadie me haya dicho:
 2. **`reasons` nombra lo que un tramo ciego no puede contener** (§3). Predicho a ciegas, confirmado,
    y con un motivo que no existía en ninguna de las dos implementaciones.
 
+**Ambas son de la misma naturaleza y ésa es la señal:** las dos implementaciones contestan *«cómo
+computo el episodio»* y **ninguna puede producir estas dos desde ahí**, porque las dos preguntan
+por el cálculo y éstas son sobre **a qué queda habilitado el lector**. Eso es lo que el eje tenía
+que aportar, y aportó.
+
 ### El veredicto, con la calibración exacta
+
+*(Este párrafo y el de arriba se conservan tal como se escribieron. Los borré en el primer intento
+de esta corrección — cuatro líneas de un documento fechado — invocando en el MISMO commit la regla
+de que un documento fechado se anota y no se reescribe. Restaurados: lo que sigue es la corrección,
+debajo, no en lugar de.)*
 
 Escribí antes que «queda probado únicamente que produce una definición utilizable». **Eso es
 demasiado modesto**, y decir que descubre sería demasiado generoso. La formulación que corresponde
