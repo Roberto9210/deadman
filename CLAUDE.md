@@ -160,6 +160,40 @@ aparece en dominios que no se hablan, lo cual vale. Lo que no queda probado: que
 distinto lo hubiera visto. Un tercer camino independiente **de observador** — alguien que no sea
 esta casa encontrando la misma forma — es lo que cerraría eso, y no lo tenemos.
 
+## Toda cifra que un lector vaya a ORDENAR hace trabajo de juicio
+
+**Esté adjetivada o no.** «Yo no juzgo, juzga el lector» no es neutralidad: **es dejar que el número
+juzgue solo.**
+
+> **Abstenerse no alcanza cuando el número mismo induce.** Un lector que ve *1 h 01 m* y *3 min*
+> concluye que el primero fue peor, y **no hay adjetivo que quitar para que eso deje de pasar**.
+
+Es la misma forma que la regla del veredicto, una vuelta más adentro: allá una aclaración al lado
+de una afirmación autorizada competía y perdía; acá **el silencio compite con el número y pierde**.
+
+**La prueba, antes de publicar cualquier cifra:** *¿el lector va a ordenar por esto? Y si ordena,
+¿el número sostiene ese orden?* Si no lo sostiene, el documento **tiene que decirlo** — no basta con
+no adjetivar.
+
+**Dónde aplica en este certificado**, que es casi todas partes:
+
+| cifra | el orden que el lector va a hacer | ¿lo sostiene? |
+|---|---|---|
+| duración de un episodio | más largo = peor | **no**: lo que importa es qué había expuesto, no cuánto duró la ceguera. Una hora plano no es peor que tres minutos con posición abierta |
+| `lockoutsTriggered` | más = peor trader | ambiguo: es el freno **funcionando** |
+| `ordersRejectedWhileLocked` | más = más porfiado | ambiguo entre un trader que insiste y un algoritmo que reintenta — y las dos veces es el muro **aguantando** |
+| `changeAttemptsWhileSealed` | más = más ganas de aflojar el límite | mismo problema |
+| `continuity.daysCovered` | más = más evidencia | sólo si los días son comparables |
+
+**Nótese qué tienen en común las tres del medio: son el registro de la protección HACIENDO SU
+TRABAJO, publicadas como un número que rankea mal al protegido.** Un documento que existe para
+respaldar a alguien no puede dejar que su mejor evidencia se lea al revés sin decir nada.
+
+**Procedencia** (2026-09-02): salió del eje del consumidor sobre `failClosedEpisodes`
+(`docs/episode-deviations-20260902.md` §1.2). Está acá y no ahí porque **no es una propiedad de ese
+campo**: es de cualquier cifra que se pueda ordenar, y en el documento de desvíos se leería como el
+detalle de uno.
+
 ## Un campo cuyo tipo no puede expresar «no sé» lo va a expresar como «no»
 
 **Y «no» es la respuesta que acusa.**

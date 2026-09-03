@@ -1135,7 +1135,11 @@ versión nueva para no fallar, que es justo el costo que la regla existe para ev
 3. **Tiene un lector nombrado.** Un campo que nadie consume es decorativo por la regla 5. Antes de
    escribirlo hay que decir **quién** lo lee.
 4. **Se prueba con su control.** Un caso que pasa y un caso mutado que falla.
-5. **SU TIPO PUEDE EXPRESAR «NO SÉ».**
+5. **SI ES UNA CIFRA, EL LECTOR LA VA A ORDENAR** — y ordenar es juzgar. Antes de publicarla:
+   *¿el número sostiene el orden que alguien va a hacer con él?* Si no, **el documento lo dice**;
+   abstenerse de adjetivos no alcanza, porque el número induce solo. La regla y la tabla de dónde
+   aplica en este certificado están en `CLAUDE.md`.
+6. **SU TIPO PUEDE EXPRESAR «NO SÉ».**
 
    > **Un campo cuyo tipo no puede expresar «no sé» lo va a expresar como «no», y «no» es la
    > respuesta que acusa.**

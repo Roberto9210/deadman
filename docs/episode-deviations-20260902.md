@@ -44,6 +44,15 @@ computa duración, no juzga. Mi predicción le atribuía no haber pensado en el 
 
 **El desvío sobrevive, pero es otro y más fino**, y es la parte que el eje del consumidor aporta:
 
+> **NOTA (2026-09-02, misma tanda): la REGLA que sale de acá se promovió a `CLAUDE.md`.** No es
+> una propiedad de `failClosedEpisodes` — es de **cualquier cifra que un lector vaya a ordenar**, y
+> el certificado está lleno: `lockoutsTriggered`, `ordersRejectedWhileLocked`,
+> `changeAttemptsWhileSealed`, `daysCovered`. En este documento se leería como el detalle de un
+> campo, que es lo más transferible del ejercicio leído como lo menos.
+>
+> **La medición se queda acá**, donde se hizo: un documento fechado se anota, no se reescribe. Lo
+> que se mudó es la regla, no el hallazgo.
+
 > El emisor eligió **«no juzgo, juzgás vos»**. La definición del consumidor dice algo distinto:
 > **«los datos no sostienen el juicio que estás por hacer»**.
 >
@@ -107,10 +116,22 @@ anterior y ninguna que nadie me haya dicho:
 2. **`reasons` nombra lo que un tramo ciego no puede contener** (§3). Predicho a ciegas, confirmado,
    y con un motivo que no existía en ninguna de las dos implementaciones.
 
-**Ambas son de la misma naturaleza y ésa es la señal:** las dos implementaciones contestan *«cómo
-computo el episodio»* y **ninguna puede producir estas dos desde ahí**, porque las dos preguntan
-por el cálculo y éstas son sobre **a qué queda habilitado el lector**. Eso es lo que el eje tenía
-que aportar, y aportó.
+### El veredicto, con la calibración exacta
+
+Escribí antes que «queda probado únicamente que produce una definición utilizable». **Eso es
+demasiado modesto**, y decir que descubre sería demasiado generoso. La formulación que corresponde
+(operador, 2-sep):
+
+> **El eje del consumidor produjo dos hallazgos que las dos implementaciones NO PUEDEN PRODUCIR
+> DESDE DONDE PREGUNTAN.** Las dos contestan *«cómo computo esto»*; ninguna contesta *«a qué queda
+> habilitado el lector»*. La duración que no mide exposición y `reasons` nombrando lo que un tramo
+> ciego no puede contener salen las dos de ese hueco, **no de un defecto anterior**.
+
+**Eso es el eje funcionando.**
+
+**Y es n=1, con el autor contaminado y sabiendo una de las respuestas** — que es exactamente la
+vara que esta casa le exige a cualquier otro número. Así que se reporta así y no mejor:
+**prometedor, una observación, y el próximo caso con otro autor u otra área.**
 
 **Y el conteo no se pareció al cuadro predicho** —dos filas salieron distintas de lo que dije, las
 dos en la dirección de que el emisor lo había pensado mejor que yo— lo cual es la única evidencia
