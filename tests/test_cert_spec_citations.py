@@ -37,7 +37,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = ROOT / "docs" / "CERT_SPEC.md"
+SPEC = ROOT / "deadman" / "docs" / "CERT_SPEC.md"
 
 #: What ships. A citation anywhere else is a repository concern; a citation in here reaches a
 #: stranger who ran `pip install deadman-kit`.
