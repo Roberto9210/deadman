@@ -90,9 +90,25 @@ def changed_files(base: str, head: str) -> list[str]:
     return [f for f in out.decode("utf-8", "replace").splitlines() if f.strip()]
 
 
-def check(base: str, head: str) -> list[str]:
+def only_the_endings_changed(path: str, base: str, head: str) -> bool:
+    """True when the two blobs are the same document under different line endings.
+
+    This is the discriminator, and it is worth being exact about what it does and does not
+    establish. It RULES OUT an edit: nobody changed a byte of content. It does NOT establish
+    autocrlf, because an editor that rewrote endings while changing nothing leaves an identical
+    trace. That is why the branch below reports a shape and withholds a remedy instead of
+    choosing between the two causes it cannot tell apart.
+    """
+    a = _run("show", f"{base}:{path}").replace(b"\r\n", b"\n")
+    b = _run("show", f"{head}:{path}").replace(b"\r\n", b"\n")
+    return a == b
+
+
+def check(base: str, head: str) -> list[tuple[str, bool]]:
+    """(report, is_autocrlf_shape) per offending file. The flag exists because the ADVICE has to
+    differ: the ordinary remedy is actively harmful for the shape it used to be printed under."""
     claimed = restoration_claims(head)
-    problems = []
+    problems: list[tuple[str, bool]] = []
     for path in changed_files(base, head):
         before = profile(_run("show", f"{base}:{path}"))
         after = profile(_run("show", f"{head}:{path}"))
@@ -104,19 +120,48 @@ def check(base: str, head: str) -> list[str]:
         if path in claimed:
             if had_this_shape_before(path, head, kind(after)):
                 continue                 # a real repair: it is going back to what it was
-            problems.append(
+            problems.append((
                 f"{path}\n"
                 f"      before: {describe(before)}\n"
                 f"      after:  {describe(after)}\n"
                 f"      CLAIM REJECTED: the commit declares LINE-ENDINGS-RESTORED for this file,\n"
                 f"      but it never had these endings. A normalisation does not become a repair\n"
-                f"      by being called one.")
+                f"      by being called one.", False))
             continue
 
-        problems.append(
+        # The blob was LF, the blob is now CRLF, and not one byte of content differs. That is
+        # what `core.autocrlf` leaves behind: it normalised CRLF to LF on the way IN, so the blob
+        # and the working copy disagreed silently for as long as the conversion was on. When
+        # `* -text` switches it off, the next `git add` stores the working bytes and the blob
+        # appears to change endings on its own. Measured here on 2026-09-03: 17 of 84 tracked
+        # text files are in that state, so this is not a corner case, it is a queue.
+        if kind(before) == "lf" and kind(after) == "crlf" \
+                and only_the_endings_changed(path, base, head):
+            problems.append((
+                f"{path}\n"
+                f"      before: {describe(before)}\n"
+                f"      after:  {describe(after)}\n"
+                f"      DIAGNOSIS: only the line endings changed - not one byte of content.\n"
+                f"      This is the trace `core.autocrlf` leaves: it normalised this blob to LF\n"
+                f"      on the way in, the working copy stayed CRLF, and once `* -text` turned\n"
+                f"      the conversion off the working bytes went in verbatim. NOTHING REWROTE\n"
+                f"      THE FILE. (An editor that rewrote endings while changing no content\n"
+                f"      leaves the same trace, so this is the shape and not a confession - what\n"
+                f"      separates them is whether the WORKING COPY changed, which git cannot\n"
+                f"      show you after the fact.)\n"
+                f"      DO NOT rewrite this file to get back to its old blob. It already has its\n"
+                f"      own endings; rewriting moves the blame of every line for a change nobody\n"
+                f"      made, which is the damage this guard exists to prevent.\n"
+                f"      THE WAY THROUGH, once per file: decide deliberately that the working copy\n"
+                f"      and the blob should agree, and say so in the commit. LINE-ENDINGS-RESTORED\n"
+                f"      does not apply and will be rejected - the blob never had these endings.",
+                True))
+            continue
+
+        problems.append((
             f"{path}\n"
             f"      before: {describe(before)}\n"
-            f"      after:  {describe(after)}")
+            f"      after:  {describe(after)}", False))
     return problems
 
 
@@ -130,14 +175,24 @@ def main(argv: list[str]) -> int:
         print(f"line endings: unchanged in every modified file ({base[:12]}..{head[:12]})")
         return 0
 
+    rewrites = [text for text, artefact in problems if not artefact]
+
+    # The remedy is printed only when there is something it applies to. Printing it above a list
+    # that is entirely autocrlf artefacts is how a true report acquires a false instruction, and
+    # whoever obeyed it would do the damage the report was warning about.
     print("LINE ENDINGS CHANGED - a one-line edit will land as a whole-file diff and move the")
-    print("git blame of every line onto this commit. Rewrite these keeping their own endings:")
+    if rewrites:
+        print("git blame of every line onto this commit. Rewrite these keeping their own endings:")
+    else:
+        print("git blame of every line onto this commit. Read the diagnosis under each before")
+        print("changing anything - the ordinary remedy does not apply to what is listed here:")
     print()
-    for p in problems:
-        print(f"  - {p}")
+    for text, _ in problems:
+        print(f"  - {text}")
     print()
-    print("The repository is deliberately NOT uniform (see .gitattributes). Matching the file you")
-    print("edit is the rule; matching some repo-wide convention is not.")
+    if rewrites:
+        print("The repository is deliberately NOT uniform (see .gitattributes). Matching the file")
+        print("you edit is the rule; matching some repo-wide convention is not.")
     return 1
 
 

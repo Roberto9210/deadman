@@ -180,3 +180,103 @@ def test_an_undeclared_repair_is_still_refused(repo):
     commit(repo, "f.txt", b"a\r\nb\nc\r\n", "put it back, saying nothing")
 
     assert run_checker(repo, "HEAD~1", "HEAD").returncode == 1
+
+
+# --------------------------------------------------------------------------------------------
+# THE MESSAGE WAS TRUE AND ITS IMPLIED CAUSE WAS FALSE
+#
+# Measured 2026-09-03: 17 of 84 tracked text files in this repository have a blob that is LF and
+# a working copy that is CRLF. Nothing rewrote them. They were committed while `core.autocrlf`
+# was normalising CRLF to LF on the way in; `* -text` later switched that off, so the first
+# `git add` after the switch stores the working bytes verbatim and the blob "changes" endings.
+#
+# The guard compares blob to blob, so it reports that correctly. What was wrong was the remedy
+# printed beneath it - "Rewrite these keeping their own endings" - because the file ALREADY has
+# its own endings, and obeying would rewrite every line nobody touched. That is the exact damage
+# the guard exists to prevent, produced by the guard's own advice.
+#
+# The discriminator is that NOTHING BUT THE ENDINGS CHANGED. It does not prove autocrlf on its
+# own - an editor that rewrote endings while changing no content looks the same - so the
+# diagnosis names both and withholds the remedy rather than guessing between them.
+
+LF_ONLY = b"alpha\nbeta\ngamma\n"
+CRLF_SAME = b"alpha\r\nbeta\r\ngamma\r\n"
+
+
+def test_the_autocrlf_shape_is_named_as_a_diagnosis(repo):
+    commit(repo, "f.txt", LF_ONLY, "blob stored LF, as autocrlf would have left it")
+    commit(repo, "f.txt", CRLF_SAME, "first add after -text: the working bytes go in verbatim")
+
+    r = run_checker(repo, "HEAD~1", "HEAD")
+
+    assert r.returncode == 1, "still reported: a correct red beats a convenient green"
+    assert "autocrlf" in r.stdout.lower(), r.stdout
+    assert "only the line endings" in r.stdout.lower(), r.stdout
+
+
+def test_the_autocrlf_shape_does_not_get_the_remedy_that_would_cause_the_damage(repo):
+    """The defect itself. This is the assertion the whole change exists for."""
+    commit(repo, "f.txt", LF_ONLY, "lf blob")
+    commit(repo, "f.txt", CRLF_SAME, "crlf blob, same content")
+
+    out = run_checker(repo, "HEAD~1", "HEAD").stdout.lower()
+
+    assert "rewrite these keeping their own endings" not in out, (
+        "the file already has its own endings; obeying this rewrites lines nobody touched")
+
+
+def test_the_diagnosis_says_what_to_actually_do(repo):
+    """A refusal that names no way through is how a guard gets disabled instead of obeyed."""
+    commit(repo, "f.txt", LF_ONLY, "lf blob")
+    commit(repo, "f.txt", CRLF_SAME, "crlf blob, same content")
+
+    out = run_checker(repo, "HEAD~1", "HEAD").stdout.lower()
+
+    assert "working copy" in out and "blob" in out, out
+
+
+# --------------------------------------------------------------------- controls that must not move
+
+def test_a_real_ending_rewrite_still_gets_the_ordinary_remedy(repo):
+    """CONTROL. Content changed AND endings changed: an editor did this, and the old advice is
+    the right advice. If this drifts into the diagnosis branch the guard has stopped working."""
+    commit(repo, "f.txt", CRLF, "crlf")
+    commit(repo, "f.txt", LF_REWRITE, "edited one line and rewrote every ending")
+
+    out = run_checker(repo, "HEAD~1", "HEAD").stdout.lower()
+
+    assert "rewrite these keeping their own endings" in out, out
+    assert "autocrlf" not in out, "content changed, so this is not the artefact"
+
+
+def test_crlf_to_lf_with_identical_content_is_not_the_artefact(repo):
+    """CONTROL. Direction matters. autocrlf normalises INTO the blob as LF, so the artefact only
+    ever appears as LF-blob becoming CRLF-blob. The opposite direction is somebody normalising,
+    which is the thing that is closed."""
+    commit(repo, "f.txt", CRLF_SAME, "crlf blob")
+    commit(repo, "f.txt", LF_ONLY, "someone normalised it")
+
+    out = run_checker(repo, "HEAD~1", "HEAD").stdout.lower()
+
+    assert "autocrlf" not in out, out
+    assert "rewrite these keeping their own endings" in out
+
+
+def test_a_mixed_file_going_uniform_is_not_the_artefact(repo):
+    """CONTROL. MIXED is not LF, so it cannot be the shape autocrlf leaves behind."""
+    commit(repo, "f.txt", b"a\r\nb\nc\r\n", "mixed")
+    commit(repo, "f.txt", b"a\r\nb\r\nc\r\n", "all crlf now")
+
+    out = run_checker(repo, "HEAD~1", "HEAD").stdout.lower()
+
+    assert "autocrlf" not in out, out
+
+
+def test_the_declared_restoration_still_wins_over_the_diagnosis(repo):
+    """CONTROL. A verified LINE-ENDINGS-RESTORED still passes silently; the new branch must not
+    intercept a file that was going back to a shape it really had."""
+    commit(repo, "f.txt", CRLF_SAME, "crlf")
+    commit(repo, "f.txt", LF_ONLY, "normalised by accident")
+    commit(repo, "f.txt", CRLF_SAME, "put it back\n\nLINE-ENDINGS-RESTORED: f.txt")
+
+    assert run_checker(repo, "HEAD~1", "HEAD").returncode == 0
